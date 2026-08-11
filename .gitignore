@@ -1,0 +1,18 @@
+# Scratch and generated files — keeps `git status` clean during development.
+
+# Agent/editor working directories
+.freebuff/
+
+# Temporary outputs and captures
+tmp_*
+SHELL_tree
+jnk*
+j_Copilot
+j_original
+out_*.txt
+
+# Compiled artifacts (sources prefix_children*.c are tracked)
+prefix_children
+
+# Editor backups
+*.bak
