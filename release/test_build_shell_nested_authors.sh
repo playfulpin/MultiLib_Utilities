@@ -3,13 +3,14 @@
 # test_build_shell_nested_authors.sh
 #
 # Regression tests for the release snapshot of the directory-tree builder:
-#   build_shell_nested_authors_6.6.8.sh (positional + named options, -d debug
-#                                        mode, -f SHELL|SQL output)
+#   build_shell_nested_authors.sh (release copy; the version lives in the
+#                                  header comment, not the file name)
 #
 # Every case runs the snapshot with the same arguments and compares its
 # "mkdir -p" output (the leading "cd <root>" line is checked separately)
 # against a stored golden file.  A divergence from the expected output fails
-# the suite.
+# the suite.  The suite also verifies the release copy is byte-identical to
+# the working script one level up, so a release can never silently drift.
 #
 # Coverage:
 #   * multi-word names ("де Бальзак Оноре", "Ван Гог") -- a prefix that ends
@@ -73,7 +74,7 @@ if [[ "${probe:0:1}" != 'а' ]]; then
 fi
 
 declare -a SCRIPTS=(
-    "build_shell_nested_authors_6.6.8.sh"
+    "build_shell_nested_authors.sh"
 )
 for s in "${SCRIPTS[@]}"; do
     [[ -f "$SCRIPT_DIR/$s" ]] || { echo "ERROR: $SCRIPT_DIR/$s not found" >&2; exit 2; }
@@ -203,8 +204,8 @@ for s in "${SCRIPTS[@]}"; do
 done
 
 # --- main script: CLI forms, defaults, SQL, debug ------------------------------
-main_copy="${COPY[build_shell_nested_authors_6.6.8.sh]}"
-main_sb="${SB[build_shell_nested_authors_6.6.8.sh]}"
+main_copy="${COPY[build_shell_nested_authors.sh]}"
+main_sb="${SB[build_shell_nested_authors.sh]}"
 echo "== build_shell_nested_authors.sh: CLI forms =="
 
 # named options must produce the same output as positional arguments
@@ -411,6 +412,19 @@ if ROOT_DIRECTORY=/ bash "$main_copy" -i "$TESTS_DIR/case_spaces.txt" -m 6 -x 5 
     report "clean_run_refuses_dangerous" fail "expected non-zero exit for ROOT_DIRECTORY=/"
 else
     report "clean_run_refuses_dangerous" ok
+fi
+
+# --- release snapshot integrity -------------------------------------------------
+# The release copy must be an exact snapshot of the working script at release
+# time.  When it drifts (the working script was edited without re-snapshotting),
+# fail and remind the developer to refresh release/ before bumping the version
+# and tagging.
+working_script="$SCRIPT_DIR/../build_shell_nested_authors.sh"
+release_script="$SCRIPT_DIR/build_shell_nested_authors.sh"
+if [[ -f "$working_script" ]] && diff -q "$working_script" "$release_script" >/dev/null 2>&1; then
+    report "release_snapshot_matches_working" ok
+else
+    report "release_snapshot_matches_working" fail "release/ copy differs from the working script (re-snapshot it)"
 fi
 
 # --- version headers ------------------------------------------------------------

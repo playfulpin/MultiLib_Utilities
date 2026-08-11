@@ -7,8 +7,33 @@ All notable changes to `build_shell_nested_authors.sh`.
 Release of the final, tested state.  No functional changes since 6.6.7; the
 version increment marks the script as complete and release-ready.
 
-- Full regression suite green: **45/45 checks** (`wsl.exe bash test_build_shell_nested_authors.sh`).
-- Syntax-verified (`bash -n`), version `6.6.8` confirmed in header and `-h` output.
+- The `V06` variant is retired; the canonical script is `build_shell_nested_authors.sh`.
+- Release package lives in `release/`: the snapshot `build_shell_nested_authors.sh`
+  (version kept in the header comment, not the file name), this changelog, and a
+  self-contained regression suite (`release/test_build_shell_nested_authors.sh`).
+- Full regression suite green: **29/29 checks** against the release snapshot
+  (`wsl.exe bash release/test_build_shell_nested_authors.sh`), including a
+  release-integrity check that the snapshot is byte-identical to the working script.
+- Tagged `v6.6.8`.
+
+## Development & release workflow
+
+The design supports ongoing work on more tools in this repository:
+
+1. **Develop** against the working script at the repository root
+   (`build_shell_nested_authors.sh`); it is the source of truth.
+2. **Bump the version** in the header comment by `0.0.1` per iteration (e.g.
+   `6.6.8` → `6.6.9`) and update the `Last updated` timestamp.
+3. **Refresh the release snapshot**: copy the working script over
+   `release/build_shell_nested_authors.sh`.
+4. **Validate**: `wsl.exe bash release/test_build_shell_nested_authors.sh` — the
+   suite diffs the snapshot against the working script (release-integrity check)
+   and runs every golden, CLI, SQL, debug, root, and clean-run check against the
+   snapshot.
+5. **Commit and tag**: commit the changes, then tag `v6.6.9`.
+
+The suite fails loudly when the snapshot drifts from the working script, so a
+release can never silently go stale.
 
 ## [6.6.7] - 2026-08-11
 
