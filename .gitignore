@@ -11,6 +11,9 @@ j_Copilot
 j_original
 out_*.txt
 
+# Archived old tool versions (kept on disk, out of version control)
+_Old_Stuff/
+
 # Compiled artifacts (sources prefix_children*.c are tracked)
 prefix_children
 
