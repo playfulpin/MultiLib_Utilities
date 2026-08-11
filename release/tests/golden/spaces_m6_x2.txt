@@ -1,0 +1,2 @@
+mkdir -p В/Ва
+mkdir -p д/де
