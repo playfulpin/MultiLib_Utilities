@@ -1,0 +1,9 @@
+Prefix Tree Visualization
+----------------------------------------
+
+Cyrillic
+----------------------------------------
+В (count: 7, range: 0–6)
+│   └── Ва (count: 7, range: 0–6)
+Д (count: 1, range: 7–7)
+    └── Де (count: 1, range: 7–7)

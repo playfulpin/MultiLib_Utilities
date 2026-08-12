@@ -1,0 +1,20 @@
+Prefix Tree Visualization
+----------------------------------------
+
+Symbols
+----------------------------------------
+" (count: 1, range: 0–0)
+│   └── "Ж (count: 1, range: 0–0)
+│       └── "Жу (count: 1, range: 0–0)
+│           └── "Жур (count: 1, range: 0–0)
+│               └── "Журн (count: 1, range: 0–0)
+( (count: 1, range: 1–1)
+    └── (М (count: 1, range: 1–1)
+        └── (Ма (count: 1, range: 1–1)
+
+Cyrillic
+----------------------------------------
+А (count: 2, range: 2–3)
+    └── Аб (count: 2, range: 2–3)
+        ├── Абв (count: 1, range: 2–2)
+        └── Абг (count: 1, range: 3–3)

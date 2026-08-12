@@ -1,0 +1,18 @@
+Prefix Tree Visualization
+----------------------------------------
+
+Cyrillic
+----------------------------------------
+В (count: 7, range: 0–6)
+│   └── Ва (count: 7, range: 0–6)
+│       └── Ван (count: 7, range: 0–6)
+│           └── Ван  (count: 7, range: 0–6)
+│               ├── Ван Г (count: 2, range: 0–1)
+│               ├── Ван Д (count: 2, range: 2–3)
+│               ├── Ван Л (count: 2, range: 4–5)
+│               └── Ван М (count: 1, range: 6–6)
+Д (count: 1, range: 7–7)
+    └── Де (count: 1, range: 7–7)
+        └── Де  (count: 1, range: 7–7)
+            └── Де К (count: 1, range: 7–7)
+                └── Де Ка (count: 1, range: 7–7)
