@@ -1,0 +1,508 @@
+#!/usr/bin/env bash
+
+###############################################################################
+# test_build_prefix_table.sh
+#
+# Regression suite for build_prefix_table.sh, the toolchain's prefix-table
+# generator (input to prefix_table_integrity.sh / prefix_tree_visualizer.sh).
+#
+# Coverage:
+#   * GOLDEN FILES -- the generated table must be byte-identical to a stored
+#     golden for every fixture (spaces, case variants, duplicates, edge,
+#     punctuation-leading names).  Run with --regen to refresh the goldens
+#     from current output.
+#   * INVARIANTS -- per golden: count == end - start + 1, no duplicate
+#     prefixes, and rows in strict byte order (LC_ALL=C).  The byte-order
+#     check is what the historical AWK-generated table violated (thousands
+#     of warnings in the integrity checker); this suite locks it in.
+#   * AWK PARITY -- on identical byte-sorted input, the generator must emit
+#     the same rows as the original utf8_prefix_generator.awk (modulo row
+#     order, which is undefined there).  Skipped if gawk is unavailable.
+#   * NORMALIZATION -- CRLF endings + blank lines, and a UTF-8 BOM, must
+#     yield byte-identical output to the plain-LF input.
+#   * CLI FORMS -- positional, named, combined, mixed; -o file output;
+#     -d ON keeps stdout identical while diagnosing on stderr; usage
+#     errors (-h, missing args, unknown flags, bad values, missing file,
+#     empty input, too many positionals).
+#   * INTEGRATION -- if the real 6088-author DB list is present, regenerate
+#     the table and assert zero byte-order violations and zero criticals.
+#   * RELEASE INTEGRITY -- the release snapshot must be byte-identical to the
+#     working script one level up (re-snapshot before tagging), and both
+#     must carry the shared 1.0.x version header.
+#
+# Usage:
+#   bash test_build_prefix_table.sh          # check against goldens
+#   bash test_build_prefix_table.sh --regen  # rewrite golden files
+#   bash test_build_prefix_table.sh --list   # list the check groups
+#   bash test_build_prefix_table.sh golden   # run one group only
+#
+# IMPORTANT: the generator slices UTF-8 prefixes character by character, so
+# the shell must have multi-byte support.  Cygwin/MSYS bash does not; run
+# from WSL instead:
+#   wsl.exe bash test_build_prefix_table.sh
+#
+# Exit status: 0 if every check passed, 1 otherwise.
+###############################################################################
+
+set -euo pipefail
+
+MODE="check"
+if [[ "${1:-}" == "--regen" ]]; then
+    MODE="regen"
+    shift
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT="$SCRIPT_DIR/build_prefix_table.sh"
+TESTS_DIR="$SCRIPT_DIR/tests"
+GOLDEN_DIR="$TESTS_DIR/golden"
+AWK_SCRIPT="$SCRIPT_DIR/utf8_prefix_generator.awk"
+
+[[ -f "$SCRIPT" ]] || { echo "ERROR: $SCRIPT not found" >&2; exit 2; }
+mkdir -p "$GOLDEN_DIR"
+
+# --- environment sanity -------------------------------------------------------
+# The generator slices UTF-8 by character; this probe fails on byte-based
+# shells such as cygwin's bash.
+probe='абв'
+if [[ "${probe:0:1}" != 'а' ]]; then
+    echo "ERROR: this shell slices multi-byte characters by byte." >&2
+    echo "Run from WSL instead:  wsl.exe bash \"$0\"" >&2
+    exit 2
+fi
+
+TMPDIR="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR"' EXIT
+
+PASS_COUNT=0
+FAIL_COUNT=0
+declare -a FAILURE_LINES=()
+
+report() { # label  ok|fail  [detail]
+    local label="$1" status="$2" detail="${3:-}"
+    if [[ "$status" == "ok" ]]; then
+        echo "  PASS  $label"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        echo "  FAIL  $label"
+        [[ -n "$detail" ]] && echo "        $detail"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        FAILURE_LINES+=("$label: $detail")
+    fi
+}
+
+# --- run the generator, capture stdout (and optional stderr separately) ------
+# usage: gen <outfile> [--stderr <errfile>] -- args...
+gen() {
+    local outfile="$1"
+    shift
+    local errfile=""
+    if [[ "${1:-}" == "--stderr" ]]; then
+        errfile="$2"
+        shift 2
+    fi
+    if [[ -n "$errfile" ]]; then
+        set +e
+        bash "$SCRIPT" "$@" > "$outfile" 2> "$errfile"
+        LAST_RC=$?
+        set -e
+    else
+        set +e
+        bash "$SCRIPT" "$@" > "$outfile" 2>&1
+        LAST_RC=$?
+        set -e
+    fi
+}
+
+# --- byte-order violations in an emitted table (strictly increasing prefix) --
+# LC_ALL=C forces byte comparison, matching prefix_table_integrity.sh's check.
+byte_order_violations() {
+    LC_ALL=C awk -F '\t' 'NR>1 && prev >= $1 {bad++} {prev=$1} END{print bad+0}' "$1"
+}
+
+# --- structural invariants: count==end-start+1, unique prefixes --------------
+invariant_problems() {
+    LC_ALL=C awk -F '\t' '
+        $2 != ($4 - $3 + 1) {p++}
+        seen[$1]++ {d++}
+        $3 < 0 || $4 < $3 {r++}
+        END{print p+0, d+0, r+0}' "$1"
+}
+
+###############################################################################
+# golden: byte-identical output vs stored golden files
+###############################################################################
+run_golden_tests() {
+    echo "== golden files =="
+    local out="$TMPDIR/golden_out.txt"
+
+    # edge: single-char names, names exactly equal to a prefix, and names with
+    # a trailing space ("де ").  Generated here so invisible trailing spaces
+    # cannot be trimmed by an editor (same convention as the shell suite).
+    edge_file="$TMPDIR/case_edge.txt"
+    {
+        for _ in {1..8}; do printf 'И\n'; done
+        for _ in {1..7}; do printf 'Ив\n'; done
+        for _ in {1..8}; do printf 'Иван\n'; done
+        for _ in {1..8}; do printf 'Иванов Петр\n'; done
+        printf 'Иванов Иван\n'
+        for _ in {1..7}; do printf 'де \n'; done          # trailing space!
+    } > "$edge_file"
+
+    # fixture | max | golden name
+    local -a CASES=(
+        "$TESTS_DIR/case_spaces.txt|5|spaces_x5.txt"
+        "$TESTS_DIR/case_spaces.txt|2|spaces_x2.txt"
+        "$TESTS_DIR/case_case_variants.txt|5|case_variants_x5.txt"
+        "$TESTS_DIR/case_duplicates.txt|5|duplicates_x5.txt"
+        "$edge_file|5|edge_x5.txt"
+        "$TESTS_DIR/case_quotes.txt|5|quotes_x5.txt"
+    )
+
+    for c in "${CASES[@]}"; do
+        IFS='|' read -r fixture max golden <<< "$c"
+        label="${golden%.txt}"
+
+        gen "$out" --stderr "$TMPDIR/golden_err.txt" "$fixture" "$max"
+        if (( LAST_RC != 0 )); then
+            report "$label" fail "exit code $LAST_RC"
+            continue
+        fi
+
+        if [[ "$MODE" == "regen" ]]; then
+            cp "$out" "$GOLDEN_DIR/$golden"
+            report "$label" ok "(golden regenerated)"
+            continue
+        fi
+
+        if diff -q "$out" "$GOLDEN_DIR/$golden" >/dev/null 2>&1; then
+            report "$label" ok
+        else
+            report "$label" fail "output differs from $golden"
+        fi
+    done
+}
+
+###############################################################################
+# invariants: every golden obeys the table contract
+###############################################################################
+run_invariant_tests() {
+    echo "== invariants =="
+    local probs n
+
+    # Only this suite's goldens: the shared golden dir also holds the shell
+    # suite's *_m6_* (mkdir) and *_sql files, which are not prefix tables.
+    local -a GOLDENS=(
+        "$GOLDEN_DIR/spaces_x5.txt"
+        "$GOLDEN_DIR/spaces_x2.txt"
+        "$GOLDEN_DIR/case_variants_x5.txt"
+        "$GOLDEN_DIR/duplicates_x5.txt"
+        "$GOLDEN_DIR/edge_x5.txt"
+        "$GOLDEN_DIR/quotes_x5.txt"
+    )
+
+    for golden in "${GOLDENS[@]}"; do
+        label="invariant_$(basename "${golden%.txt}")"
+
+        n=$(byte_order_violations "$golden")
+        if (( n != 0 )); then
+            report "$label" fail "$n byte-order violations"
+            continue
+        fi
+
+        # count==end-start+1 | duplicate prefix | bad range
+        probs=$(invariant_problems "$golden")
+        if [[ "$probs" == "0 0 0" ]]; then
+            report "$label" ok
+        else
+            report "$label" fail "problems (count/dup/range): $probs"
+        fi
+    done
+}
+
+###############################################################################
+# parity: identical rows to the original AWK generator on the same input
+###############################################################################
+run_parity_tests() {
+    echo "== AWK parity =="
+    if ! command -v gawk >/dev/null 2>&1; then
+        echo "  SKIP  (gawk not found)"
+        return
+    fi
+    if [[ ! -f "$AWK_SCRIPT" ]]; then
+        report "awk_script_present" fail "utf8_prefix_generator.awk missing"
+        return
+    fi
+    report "awk_script_present" ok
+
+    local input awksorted mysorted
+    local -a FIXTURES=("case_spaces.txt" "case_case_variants.txt" "case_duplicates.txt")
+
+    for fixture in "${FIXTURES[@]}"; do
+        label="parity_${fixture%.txt}"
+        input="$TESTS_DIR/$fixture"
+
+        # Feed BOTH generators the byte-sorted list: the AWK script indexes
+        # authors by input position, so parity requires identical input order.
+        LC_ALL=C sort "$input" > "$TMPDIR/sorted.txt"
+
+        # AWK output is hash-ordered; sort both sides before comparing.
+        # stderr is silenced: gawk warns about "invalid multibyte data" while
+        # scanning its \x80-\xBF continuation-byte table in a UTF-8 locale;
+        # the warning is cosmetic and the emitted rows are unaffected.
+        gawk -v maxlen=5 -F '\n' -f "$AWK_SCRIPT" "$TMPDIR/sorted.txt" \
+            2>/dev/null | LC_ALL=C sort > "$TMPDIR/awk_out.txt"
+        gen "$TMPDIR/my_out.txt" --stderr "$TMPDIR/my_err.txt" "$TMPDIR/sorted.txt" 5
+        LC_ALL=C sort "$TMPDIR/my_out.txt" > "$TMPDIR/my_sorted.txt"
+
+        if diff -q "$TMPDIR/awk_out.txt" "$TMPDIR/my_sorted.txt" >/dev/null 2>&1; then
+            report "$label" ok
+        else
+            report "$label" fail "rows differ from AWK generator"
+        fi
+    done
+}
+
+###############################################################################
+# normalization: CRLF / blank lines / BOM must not change the table
+###############################################################################
+run_normalization_tests() {
+    echo "== normalization =="
+
+    # CRLF twin of case_spaces.txt, plus a blank CRLF line in the middle.
+    sed 's/$/\r/' "$TESTS_DIR/case_spaces.txt" \
+        | sed '3a\
+' > "$TMPDIR/crlf.txt"
+
+    gen "$TMPDIR/lf_out.txt" --stderr "$TMPDIR/lf_err.txt" "$TESTS_DIR/case_spaces.txt" 5
+    gen "$TMPDIR/crlf_out.txt" --stderr "$TMPDIR/crlf_err.txt" "$TMPDIR/crlf.txt" 5
+    if (( LAST_RC == 0 )) && diff -q "$TMPDIR/lf_out.txt" "$TMPDIR/crlf_out.txt" >/dev/null 2>&1; then
+        report "crlf_and_blank_lines" ok
+    else
+        report "crlf_and_blank_lines" fail "CRLF+blank input differs from LF input"
+    fi
+
+    # UTF-8 BOM prefix on the first line (as produced by Windows editors).
+    { printf '\xEF\xBB\xBF'; cat "$TESTS_DIR/case_spaces.txt"; } > "$TMPDIR/bom.txt"
+    gen "$TMPDIR/bom_out.txt" --stderr "$TMPDIR/bom_err.txt" "$TMPDIR/bom.txt" 5
+    if (( LAST_RC == 0 )) && diff -q "$TMPDIR/lf_out.txt" "$TMPDIR/bom_out.txt" >/dev/null 2>&1; then
+        report "bom_stripped" ok
+    else
+        report "bom_stripped" fail "BOM input differs from plain input"
+    fi
+}
+
+###############################################################################
+# cli: every documented invocation form and error path
+###############################################################################
+run_cli_tests() {
+    echo "== CLI forms =="
+    local out="$TMPDIR/cli_out.txt" err="$TMPDIR/cli_err.txt"
+    local input="$TESTS_DIR/case_spaces.txt"
+
+    # --- Equivalent invocation forms produce identical output ----------------
+    gen "$TMPDIR/cli_positional.txt" --stderr "$TMPDIR/cli_err.txt" "$input" 5
+    rc_pos=$LAST_RC
+    gen "$TMPDIR/cli_named.txt" --stderr "$TMPDIR/cli_err2.txt" -i "$input" -x 5
+    gen "$TMPDIR/cli_combined.txt" --stderr "$TMPDIR/cli_err3.txt" --input-file="$input" --max-prefix=5
+    gen "$TMPDIR/cli_mixed.txt" --stderr "$TMPDIR/cli_err4.txt" "$input" -x 5
+    gen "$TMPDIR/cli_default.txt" --stderr "$TMPDIR/cli_err5.txt" -i "$input"
+
+    if (( rc_pos == 0 )) \
+       && diff -q "$TMPDIR/cli_positional.txt" "$TMPDIR/cli_named.txt" >/dev/null 2>&1 \
+       && diff -q "$TMPDIR/cli_positional.txt" "$TMPDIR/cli_combined.txt" >/dev/null 2>&1 \
+       && diff -q "$TMPDIR/cli_positional.txt" "$TMPDIR/cli_mixed.txt" >/dev/null 2>&1 \
+       && diff -q "$TMPDIR/cli_positional.txt" "$TMPDIR/cli_default.txt" >/dev/null 2>&1; then
+        report "cli_forms_identical" ok
+    else
+        report "cli_forms_identical" fail "positional/named/combined/mixed/default outputs differ"
+    fi
+
+    # --- -o writes the file instead of stdout --------------------------------
+    gen "$out" --stderr "$err" "$input" 5 -o "$TMPDIR/outfile.txt"
+    if (( LAST_RC == 0 )) \
+       && [[ ! -s "$out" ]] \
+       && diff -q "$TMPDIR/outfile.txt" "$GOLDEN_DIR/spaces_x5.txt" >/dev/null 2>&1; then
+        report "cli_output_file" ok
+    else
+        report "cli_output_file" fail "-o did not write the golden bytes to the file"
+    fi
+
+    # --- -d ON: stdout identical to normal run, DEBUG lines only on stderr ---
+    gen "$out" --stderr "$err" "$input" 5 -d on
+    if (( LAST_RC == 0 )) \
+       && diff -q "$out" "$GOLDEN_DIR/spaces_x5.txt" >/dev/null 2>&1 \
+       && grep -q '^DEBUG:' "$err" \
+       && ! grep -q '^DEBUG:' "$out"; then
+        report "cli_debug_stdout_clean" ok
+    else
+        report "cli_debug_stdout_clean" fail "debug mode polluted stdout or produced no DEBUG lines"
+    fi
+
+    # --- Error paths all exit non-zero ---------------------------------------
+    local -a ERROR_CASES=(
+        "cli_no_args|"
+        "cli_unknown_flag|--bogus $input"
+        "cli_bad_max|$input abc"
+        "cli_max_zero|$input 0"
+        "cli_bad_debug|$input 5 -d MAYBE"
+        "cli_missing_file|/nonexistent.txt 5"
+    )
+    for c in "${ERROR_CASES[@]}"; do
+        IFS='|' read -r label args <<< "$c"
+        gen "$out" $args
+        if (( LAST_RC != 0 )); then
+            report "$label" ok
+        else
+            report "$label" fail "expected non-zero exit"
+        fi
+    done
+
+    # --- Empty input file must fail, not emit an empty table ------------------
+    : > "$TMPDIR/empty.txt"
+    gen "$out" "$TMPDIR/empty.txt" 5
+    if (( LAST_RC != 0 )); then
+        report "cli_empty_input" ok
+    else
+        report "cli_empty_input" fail "expected non-zero exit on empty input"
+    fi
+
+    # --- Too many positional arguments ----------------------------------------
+    gen "$out" "$input" 5 6
+    if (( LAST_RC != 0 )); then
+        report "cli_too_many_positional" ok
+    else
+        report "cli_too_many_positional" fail "expected non-zero exit"
+    fi
+
+    # --- -h prints the version and exits non-zero (usage() exits 1) ----------
+    gen "$out" -h
+    if (( LAST_RC != 0 )) && grep -qE 'build_prefix_table\.sh v[0-9]+\.[0-9]+\.[0-9]+' "$out"; then
+        report "cli_help_version" ok
+    else
+        report "cli_help_version" fail "-h must print the version and exit 1"
+    fi
+
+    # --- Startup banner: version + walker variant on stderr, not stdout ------
+    # stdout carries the table (often redirected straight into a file), so the
+    # banner must never leak into it; a stale copy is visible because it prints
+    # an older version or no banner at all.
+    gen "$out" --stderr "$err" "$input" 5
+    if (( LAST_RC == 0 )) \
+       && grep -qE 'build_prefix_table\.sh v[0-9]+\.[0-9]+\.[0-9]+ \(pre-order trie walker\)' "$err" \
+       && ! grep -q 'build_prefix_table.sh v' "$out"; then
+        report "cli_banner_stderr_only" ok
+    else
+        report "cli_banner_stderr_only" fail "banner must show version + walker on stderr only"
+    fi
+}
+
+###############################################################################
+# integration: the real 6088-author DB list (present in the working tree)
+###############################################################################
+run_integration_tests() {
+    echo "== integration (real data) =="
+    # The real DB list and the integrity checker live in the working tree one
+    # level up (release/ holds only released artifacts).  When absent -- e.g.
+    # a bare release copy -- this group skips instead of failing.
+    local real_list="$SCRIPT_DIR/../authors_list_from_db.txt"
+    local integrity_checker="$SCRIPT_DIR/../prefix_table_integrity.sh"
+    if [[ ! -f "$real_list" || ! -f "$integrity_checker" ]]; then
+        echo "  SKIP  (authors_list_from_db.txt or prefix_table_integrity.sh not found)"
+        return
+    fi
+
+    local out="$TMPDIR/real_table.txt"
+    gen "$out" --stderr "$TMPDIR/real_err.txt" "$real_list" 5
+    if (( LAST_RC != 0 )); then
+        report "real_data_rc" fail "exit code $LAST_RC"
+        return
+    fi
+
+    local n
+    n=$(byte_order_violations "$out")
+    if (( n == 0 )); then
+        report "real_data_byte_order" ok
+    else
+        report "real_data_byte_order" fail "$n byte-order violations"
+    fi
+
+    # Cross-check against the integrity checker: zero criticals expected.
+    set +e
+    bash "$integrity_checker" -t "$out" -x 5 > "$TMPDIR/integ.txt" 2>&1
+    integ_rc=$?
+    set -e
+    if (( integ_rc == 0 )) && grep -q '0 critical' "$TMPDIR/integ.txt"; then
+        report "real_data_integrity" ok
+    else
+        report "real_data_integrity" fail "integrity checker rc=$integ_rc"
+    fi
+}
+
+###############################################################################
+# release integrity + version headers (mirrors the shell suite)
+###############################################################################
+run_release_tests() {
+    echo "== release integrity =="
+
+    # The release copy must be an exact snapshot of the working script one
+    # level up at release time.  When it drifts (the working script was edited
+    # without re-snapshotting), fail and remind the developer to refresh
+    # release/ before bumping the version and tagging.
+    local working_script="$SCRIPT_DIR/../build_prefix_table.sh"
+    local release_script="$SCRIPT_DIR/build_prefix_table.sh"
+    if [[ -f "$working_script" ]] && diff -q "$working_script" "$release_script" >/dev/null 2>&1; then
+        report "release_snapshot_matches_working" ok
+    else
+        report "release_snapshot_matches_working" fail "release/ copy differs from the working script (re-snapshot it)"
+    fi
+
+    # Both scripts must carry the shared 1.0.x semver ladder in their header,
+    # so every 0.0.1 bump is visible there (and therefore in -h output).  The
+    # value is read from the header itself -- the same single source of truth
+    # the scripts use to print "v<version>" in their usage text.
+    for s in "build_prefix_table.sh"; do
+        version="$(sed -n 's/^# Version:[[:space:]]*//p' "$SCRIPT_DIR/$s" | head -n 1)"
+        if [[ "$version" =~ ^1\.0\.[0-9]+$ ]]; then
+            report "version_${s%.sh}" ok
+        else
+            report "version_${s%.sh}" fail "got '$version', expected ^1\\.0\\.[0-9]+$"
+        fi
+    done
+}
+
+###############################################################################
+# dispatch
+###############################################################################
+case "${1:-all}" in
+    all)          run_golden_tests; run_invariant_tests; run_parity_tests
+                  run_normalization_tests; run_cli_tests; run_integration_tests
+                  run_release_tests ;;
+    golden)       run_golden_tests ;;
+    invariants)   run_invariant_tests ;;
+    parity)       run_parity_tests ;;
+    normalization) run_normalization_tests ;;
+    cli)          run_cli_tests ;;
+    integration)  run_integration_tests ;;
+    release)      run_release_tests ;;
+    --list)
+        echo "golden:        spaces_x5, spaces_x2, case_variants_x5, duplicates_x5, edge_x5, quotes_x5"
+        echo "invariants:    byte order, count==end-start+1, unique prefixes, valid ranges"
+        echo "parity:        identical rows to utf8_prefix_generator.awk (needs gawk)"
+        echo "normalization: CRLF + blank lines, UTF-8 BOM"
+        echo "cli:           forms, -o, -d, error paths, -h version"
+        echo "integration:   real authors_list_from_db.txt (byte order + integrity)"
+        echo "release:       snapshot matches working script, 1.0.x version header"
+        exit 0
+        ;;
+    *) echo "Unknown check group '$1'." >&2; exit 1 ;;
+esac
+
+echo ""
+echo "=============================="
+echo "PASS: $PASS_COUNT   FAIL: $FAIL_COUNT"
+if (( FAIL_COUNT > 0 )); then
+    printf '  %s\n' "${FAILURE_LINES[@]}"
+    exit 1
+fi
+echo "All tests passed."
