@@ -5,6 +5,28 @@ All notable changes to the author-toolchain scripts in this repository:
 `build_prefix_table.sh` (prefix-table generator), and
 `prefix_tree_visualizer.sh` (tree renderer).
 
+## [release] - 2026-08-13
+
+- **Root-only layout finalized.**  The `release/` snapshot directory was moved
+  to the repository root earlier, but the changelog's release workflow and the
+  three shell suites still assumed the old snapshot model.  The workflow
+  section now documents the root-only layout, and each suite's
+  `release_snapshot_matches_working` diff (which compared the script against a
+  `release/` copy one level up and would now fail) is replaced by the
+  version-header check.
+- **Integration path fix.**  `test_build_prefix_table.sh`'s real-data
+  integration group pointed `authors_list_from_db.txt` and
+  `prefix_table_integrity.sh` at `$SCRIPT_DIR/../…`; it now points at the
+  repository root and runs instead of skipping.
+- **Removed a stray empty `1` file** from the repository root.
+- **Tagged the release.**  Tool-prefixed tags `build_prefix_table-1.0.4`,
+  `prefix_table_integrity-1.2.1`, and `utf8_prefix_generator-1.1` now name each
+  tool's released version.
+- **Suites green under WSL (96/96 checks):** prefix table 34/34, nested-authors
+  28/28, visualizer 12/12, AWK generator 11/11, e2e pipeline 11/11.  (The three
+  shell suites each report one fewer check than the historical 35/29/13
+  figures — the obsolete release-snapshot diff was removed.)
+
 ## [utf8_prefix_generator.awk 1.1] - 2026-08-13
 
 - **`utf8_prefix` off-by-one fix.**  The prefix slicer broke at a character's

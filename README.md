@@ -129,6 +129,29 @@ Suites write nothing to the repository; each builds its scratch files in a
 temporary directory. The golden-based suites accept `--regen` to refresh their
 golden files.
 
+## Releases & versioning
+
+Each script's version lives in its header comment (`# Version:`), which the
+script also prints in `-h` — a single source of truth, bumped `0.0.1` per
+iteration. The working script at the repository root is the released artifact;
+there is no separate `release/` snapshot to maintain.
+
+Releases are tagged with a tool-prefixed name:
+
+| Tool | Version | Tag |
+|---|---|---|
+| `build_prefix_table.sh` | 1.0.4 | `build_prefix_table-1.0.4` |
+| `prefix_table_integrity.sh` | 1.2.1 | `prefix_table_integrity-1.2.1` |
+| `prefix_tree_visualizer.sh` | 2.8.1 | `v2.8.1` |
+| `build_shell_nested_authors.sh` | 6.6.8 | `v6.6.8` |
+| `utf8_prefix_generator.awk` | 1.1 | `utf8_prefix_generator-1.1` |
+
+`v2.8.1` and `v6.6.8` predate the tool-prefixed convention.
+
+To cut a release: bump the header version, run the WSL test suites (see
+[Testing](#testing)), commit, then tag with the tool-prefixed name. See
+`CHANGELOG.md` for the full history and step-by-step workflow.
+
 ## Repository layout
 
 ```
@@ -148,4 +171,5 @@ CHANGELOG.md                    full release history
 _Old_Stuff/ , _Save_Stuff/      archived/scratch files (git-ignored)
 ```
 
-See `CHANGELOG.md` for version history and the release workflow.
+See `CHANGELOG.md` for the full release history and the step-by-step release
+workflow.
