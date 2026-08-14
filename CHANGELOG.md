@@ -5,6 +5,39 @@ All notable changes to the author-toolchain scripts in this repository:
 `build_prefix_table.sh` (prefix-table generator), and
 `prefix_tree_visualizer.sh` (tree renderer).
 
+## [utf8_prefix_generator.awk 1.1] - 2026-08-13
+
+- **`utf8_prefix` off-by-one fix.**  The prefix slicer broke at a character's
+  lead byte instead of past its continuation bytes, so under a byte locale
+  (`LC_ALL=C`) every prefix ending in a multi-byte character was sliced in
+  half (e.g. `аб` became `а` plus a stray lead byte).  It now ends on a
+  character boundary in both gawk string modes; UTF-8-locale output is
+  unchanged (the AWK-parity group is still green).
+- **New direct regression suite (`test_utf8_prefix_generator.sh`).**  Unlike
+  the parity group — which only compares this script against the newer
+  generator, so a bug they share could still pass — this asserts the AWK
+  script's own rows: multi-byte / 3-byte / 4-byte prefix slicing, `maxlen`
+  capping, space-preserving multi-word authors, `count`/`start`/`end` ranges,
+  and byte-locale correctness.
+- Suite: **11/11 checks** green under WSL.
+
+## [toolchain] - 2026-08-13
+
+- **Restored `prefix_table_integrity.sh` to the repository root.**  The
+  validator (v1.2.1) had been parked in `_Save_Stuff/` and was absent from the
+  active tree, so the generator suite's real-data integrity cross-check
+  silently skipped.  It is once again a first-class toolchain component, living
+  next to the generator whose output it validates.
+- **New end-to-end pipeline suite (`test_e2e_pipeline.sh`).**  Chains the three
+  stages — `build_prefix_table.sh` → `prefix_table_integrity.sh` →
+  `prefix_tree_visualizer.sh` — on the real 6,088-author list.  Asserts the
+  generated table is non-empty and in strict byte order, that the validator
+  reports 0 criticals and checks exactly the emitted row count, that the
+  renderer draws a multi-level tree (the utf8_chop fix), and that a concrete
+  prefix's count survives generator → renderer intact.  This locks out the
+  cross-tool format drift no single per-tool suite can see.
+- Suite: **11/11 checks** green under WSL on the real author list.
+
 ## [prefix_tree_visualizer.sh 2.8.1] - 2026-08-11
 
 First release of the tree renderer, integrated into the toolchain.

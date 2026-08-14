@@ -12,6 +12,7 @@ j_Copilot
 j_original
 out_*.txt
 *utf8*
+!test_utf8_prefix_generator.sh
 
 # Compiled artifacts (sources prefix_children*.c are tracked)
 prefix_children

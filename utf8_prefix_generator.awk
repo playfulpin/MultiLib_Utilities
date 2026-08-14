@@ -2,7 +2,7 @@
 ###############################################################################
 # utf8_prefix_generator.awk
 #
-# Version: 1.0
+# Version: 1.1
 # Timestamp: 2026‑07‑28 01:42 CDT
 #
 # PURPOSE:
@@ -44,18 +44,21 @@ function utf8_len(s,    i,c,len) {
 }
 
 # Extract first N UTF‑8 characters
-function utf8_prefix(s, chars,    i,c,count,pos) {
+function utf8_prefix(s, chars,    c,count,pos) {
     count = 0
-    pos = 1
-    while (pos <= length(s)) {
-        c = substr(s, pos, 1)
-        if (!is_cont_byte(c)) {
-            count++
-            if (count == chars)
-                break
-        }
+    pos = 0
+    while (count < chars && pos < length(s)) {
         pos++
+        c = substr(s, pos, 1)
+        if (!is_cont_byte(c))
+            count++
     }
+    # pos is the lead byte of the chars-th character.  Advance past the
+    # continuation bytes that follow it so the slice ends on a character
+    # boundary.  The historical code broke at the lead byte itself, which
+    # sliced a multi-byte character in half under a byte locale (LC_ALL=C).
+    while (pos < length(s) && is_cont_byte(substr(s, pos + 1, 1)))
+        pos++
     return substr(s, 1, pos)
 }
 
