@@ -128,25 +128,21 @@ The design supports ongoing work on more tools in this repository.  Every
 released tool follows the same pattern:
 
 1. **Develop** against the working script at the repository root (e.g.
-   `build_prefix_table.sh`); it is the source of truth.
+   `build_prefix_table.sh`); it is both the source of truth and the released
+   artifact — there is no separate `release/` snapshot.
 2. **Bump the version** in the header comment by `0.0.1` per iteration (e.g.
-   `6.6.8` → `6.6.9` for the tree builder, `1.0.2` → `1.0.3` for the prefix
+   `6.6.8` → `6.6.9` for the tree builder, `1.0.3` → `1.0.4` for the prefix
    table, `2.8.1` → `2.8.2` for the visualizer) and update the `Last updated`
    timestamp.
-3. **Refresh the release snapshot**: copy the working script over its twin in
-   `release/` (`release/build_shell_nested_authors.sh`,
-   `release/build_prefix_table.sh`, `release/prefix_tree_visualizer.sh`).
-4. **Validate**: run the release suites
-   (`wsl.exe bash release/test_build_shell_nested_authors.sh`,
-   `wsl.exe bash release/test_build_prefix_table.sh`, and
-   `wsl.exe bash release/test_prefix_tree_visualizer.sh`) — each suite diffs
-   its snapshot against the working script (release-integrity check) and runs
-   every golden, CLI, and behavioral check against the snapshot.
-5. **Commit and tag**: commit the changes, then tag the release
+3. **Validate**: run the regression suites at the repository root from WSL
+   (`wsl.exe bash test_build_shell_nested_authors.sh`,
+   `wsl.exe bash test_build_prefix_table.sh`,
+   `wsl.exe bash test_prefix_tree_visualizer.sh`,
+   `wsl.exe bash test_utf8_prefix_generator.sh`, and
+   `wsl.exe bash test_e2e_pipeline.sh`) — each golden, CLI, and behavioral
+   check runs directly against the working script.
+4. **Commit and tag**: commit the changes, then tag the release
    (`v6.6.9`, or a tag naming the tool's version).
-
-The suites fail loudly when a snapshot drifts from its working script, so a
-release can never silently go stale.
 
 ## [6.6.7] - 2026-08-11
 

@@ -2,15 +2,15 @@
 # -----------------------------------------------------------------------------
 # test_build_shell_nested_authors.sh
 #
-# Regression tests for the release snapshot of the directory-tree builder:
-#   build_shell_nested_authors.sh (release copy; the version lives in the
-#                                  header comment, not the file name)
+# Regression tests for the directory-tree builder:
+#   build_shell_nested_authors.sh (the version lives in the header
+#                                  comment, not the file name)
 #
-# Every case runs the snapshot with the same arguments and compares its
+# Every case runs the script with the same arguments and compares its
 # "mkdir -p" output (the leading "cd <root>" line is checked separately)
 # against a stored golden file.  A divergence from the expected output fails
-# the suite.  The suite also verifies the release copy is byte-identical to
-# the working script one level up, so a release can never silently drift.
+# the suite.  The script at the repository root is the released artifact, so
+# there is no separate release snapshot to drift.
 #
 # Coverage:
 #   * multi-word names ("де Бальзак Оноре", "Ван Гог") -- a prefix that ends
@@ -414,24 +414,11 @@ else
     report "clean_run_refuses_dangerous" ok
 fi
 
-# --- release snapshot integrity -------------------------------------------------
-# The release copy must be an exact snapshot of the working script at release
-# time.  When it drifts (the working script was edited without re-snapshotting),
-# fail and remind the developer to refresh release/ before bumping the version
-# and tagging.
-working_script="$SCRIPT_DIR/../build_shell_nested_authors.sh"
-release_script="$SCRIPT_DIR/build_shell_nested_authors.sh"
-if [[ -f "$working_script" ]] && diff -q "$working_script" "$release_script" >/dev/null 2>&1; then
-    report "release_snapshot_matches_working" ok
-else
-    report "release_snapshot_matches_working" fail "release/ copy differs from the working script (re-snapshot it)"
-fi
-
 # --- version headers ------------------------------------------------------------
-# Both scripts must carry the shared 6.6.x semver ladder in their header, so
+# The script must carry the shared 6.6.x semver ladder in its header, so
 # every 0.0.1 bump is visible there (and therefore in -h output).  The value
 # is read from the header itself -- the same single source of truth the
-# scripts use to print "v<version>" in their usage text.
+# script uses to print "v<version>" in its usage text.
 echo "== version headers =="
 for s in "${SCRIPTS[@]}"; do
     version="$(sed -n 's/^# Version:[[:space:]]*//p' "$SCRIPT_DIR/$s" | head -n 1)"

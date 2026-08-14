@@ -26,9 +26,8 @@
 #     empty input, too many positionals).
 #   * INTEGRATION -- if the real 6088-author DB list is present, regenerate
 #     the table and assert zero byte-order violations and zero criticals.
-#   * RELEASE INTEGRITY -- the release snapshot must be byte-identical to the
-#     working script one level up (re-snapshot before tagging), and both
-#     must carry the shared 1.0.x version header.
+#   * VERSION HEADER -- the script at the repository root is the released
+#     artifact and must carry the shared 1.0.x version header.
 #
 # Usage:
 #   bash test_build_prefix_table.sh          # check against goldens
@@ -402,11 +401,10 @@ run_cli_tests() {
 ###############################################################################
 run_integration_tests() {
     echo "== integration (real data) =="
-    # The real DB list and the integrity checker live in the working tree one
-    # level up (release/ holds only released artifacts).  When absent -- e.g.
-    # a bare release copy -- this group skips instead of failing.
-    local real_list="$SCRIPT_DIR/../authors_list_from_db.txt"
-    local integrity_checker="$SCRIPT_DIR/../prefix_table_integrity.sh"
+    # The real DB list and the integrity checker live next to this suite at
+    # the repository root.  When absent, this group skips instead of failing.
+    local real_list="$SCRIPT_DIR/authors_list_from_db.txt"
+    local integrity_checker="$SCRIPT_DIR/prefix_table_integrity.sh"
     if [[ ! -f "$real_list" || ! -f "$integrity_checker" ]]; then
         echo "  SKIP  (authors_list_from_db.txt or prefix_table_integrity.sh not found)"
         return
@@ -440,27 +438,16 @@ run_integration_tests() {
 }
 
 ###############################################################################
-# release integrity + version headers (mirrors the shell suite)
+# version header
 ###############################################################################
 run_release_tests() {
-    echo "== release integrity =="
+    echo "== version header =="
 
-    # The release copy must be an exact snapshot of the working script one
-    # level up at release time.  When it drifts (the working script was edited
-    # without re-snapshotting), fail and remind the developer to refresh
-    # release/ before bumping the version and tagging.
-    local working_script="$SCRIPT_DIR/../build_prefix_table.sh"
-    local release_script="$SCRIPT_DIR/build_prefix_table.sh"
-    if [[ -f "$working_script" ]] && diff -q "$working_script" "$release_script" >/dev/null 2>&1; then
-        report "release_snapshot_matches_working" ok
-    else
-        report "release_snapshot_matches_working" fail "release/ copy differs from the working script (re-snapshot it)"
-    fi
-
-    # Both scripts must carry the shared 1.0.x semver ladder in their header,
-    # so every 0.0.1 bump is visible there (and therefore in -h output).  The
-    # value is read from the header itself -- the same single source of truth
-    # the scripts use to print "v<version>" in their usage text.
+    # The script at the repository root is the released artifact and must
+    # carry the shared 1.0.x semver ladder in its header, so every 0.0.1 bump
+    # is visible there (and therefore in -h output).  The value is read from
+    # the header itself -- the same single source of truth the script uses to
+    # print "v<version>" in its usage text.
     for s in "build_prefix_table.sh"; do
         version="$(sed -n 's/^# Version:[[:space:]]*//p' "$SCRIPT_DIR/$s" | head -n 1)"
         if [[ "$version" =~ ^1\.0\.[0-9]+$ ]]; then
@@ -492,7 +479,7 @@ case "${1:-all}" in
         echo "normalization: CRLF + blank lines, UTF-8 BOM"
         echo "cli:           forms, -o, -d, error paths, -h version"
         echo "integration:   real authors_list_from_db.txt (byte order + integrity)"
-        echo "release:       snapshot matches working script, 1.0.x version header"
+        echo "release:       1.0.x version header"
         exit 0
         ;;
     *) echo "Unknown check group '$1'." >&2; exit 1 ;;

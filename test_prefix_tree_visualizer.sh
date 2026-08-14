@@ -21,8 +21,8 @@
 #   * DEPTH -- --depth N truncates the tree at depth N.
 #   * CLI -- a missing/nonexistent table prints usage with the version and
 #     exits 1.
-#   * RELEASE INTEGRITY -- the release snapshot must be byte-identical to the
-#     working script one level up, and the header must carry the 2.8.x ladder.
+#   * VERSION HEADER -- the script at the repository root is the released
+#     artifact, and its header must carry the 2.8.x ladder.
 #
 # Usage:
 #   bash test_prefix_tree_visualizer.sh          # check against goldens
@@ -224,23 +224,14 @@ run_cli_tests() {
 }
 
 ###############################################################################
-# release integrity + version headers
+# version header
 ###############################################################################
 run_release_tests() {
-    echo "== release integrity =="
+    echo "== version header =="
 
-    # The release copy must be an exact snapshot of the working script one
-    # level up at release time.
-    local working_script="$SCRIPT_DIR/../prefix_tree_visualizer.sh"
-    local release_script="$SCRIPT_DIR/prefix_tree_visualizer.sh"
-    if [[ -f "$working_script" ]] && diff -q "$working_script" "$release_script" >/dev/null 2>&1; then
-        report "release_snapshot_matches_working" ok
-    else
-        report "release_snapshot_matches_working" fail "release/ copy differs from the working script (re-snapshot it)"
-    fi
-
-    # The header must carry the shared 2.8.x semver ladder.
-    version="$(sed -n 's/^# Version:[[:space:]]*//p' "$release_script" | head -n 1)"
+    # The script at the repository root is the released artifact; its header
+    # must carry the shared 2.8.x semver ladder.
+    version="$(sed -n 's/^# Version:[[:space:]]*//p' "$SCRIPT" | head -n 1)"
     if [[ "$version" =~ ^2\.8\.[0-9]+$ ]]; then
         report "version_prefix_tree_visualizer" ok
     else
@@ -269,7 +260,7 @@ case "${1:-all}" in
         echo "filter:     --filter Symbols / Cyrillic isolate their sections"
         echo "depth:      --depth 2 truncates the tree"
         echo "cli:        missing table prints usage + version, exits 1"
-        echo "release:    snapshot matches working script, 2.8.x version header"
+        echo "release:    2.8.x version header"
         exit 0
         ;;
     *) echo "Unknown check group '$1'." >&2; exit 1 ;;
