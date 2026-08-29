@@ -2,7 +2,10 @@
 
 # Agent/editor working directories
 .freebuff/
+
+# Archived/scratch directories
 _Old_Stuff/
+_Save_Stuff/
 
 # Temporary outputs and captures
 tmp_*
