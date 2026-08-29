@@ -7,11 +7,11 @@ prefix tree, and a nested directory hierarchy — all validated against a real
 
 ## Shipped tools
 
-- `build_shell_nested_authors.sh` **6.6.8** — nested directory-tree builder (`mkdir -p` / SQL)
-- `build_prefix_table.sh` **1.0.4** — pre-order trie prefix-table generator
-- `prefix_table_integrity.sh` **1.2.1** — ultra-strict table validator
-- `prefix_tree_visualizer.sh` **2.8.1** — Unicode tree renderer
-- `utf8_prefix_generator.awk` **1.1** — original AWK generator (parity reference)
+- `bin/build_shell_nested_authors.sh` **6.6.8** — nested directory-tree builder (`mkdir -p` / SQL)
+- `bin/build_prefix_table.sh` **1.0.4** — pre-order trie prefix-table generator
+- `bin/prefix_table_integrity.sh` **1.2.1** — ultra-strict table validator
+- `bin/prefix_tree_visualizer.sh` **2.8.1** — Unicode tree renderer
+- `lib/utf8_prefix_generator.awk` **1.1** — original AWK generator (parity reference)
 
 ## Highlights
 

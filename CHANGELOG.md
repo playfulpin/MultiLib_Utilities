@@ -1,9 +1,19 @@
 # Changelog
 
 All notable changes to the author-toolchain scripts in this repository:
-`build_shell_nested_authors.sh` (directory-tree builder),
-`build_prefix_table.sh` (prefix-table generator), and
-`prefix_tree_visualizer.sh` (tree renderer).
+`bin/build_shell_nested_authors.sh` (directory-tree builder),
+`bin/build_prefix_table.sh` (prefix-table generator), and
+`bin/prefix_tree_visualizer.sh` (tree renderer).
+
+## [Unreleased] - 2026-08-29
+
+- Reorganized the repository into a conventional Bash project layout:
+  executable tools under `bin/`, reusable AWK code under `lib/`, regression
+  suites under `tests/`, source data and SQL under `data/`, and documentation
+  at the repository root.
+- Updated script, test, and documentation references for the new paths.
+- Kept archived/scratch directories and the pre-existing local cleanup changes
+  separate from the active toolchain.
 
 ## [release] - 2026-08-13
 
@@ -14,9 +24,9 @@ All notable changes to the author-toolchain scripts in this repository:
   `release_snapshot_matches_working` diff (which compared the script against a
   `release/` copy one level up and would now fail) is replaced by the
   version-header check.
-- **Integration path fix.**  `test_build_prefix_table.sh`'s real-data
-  integration group pointed `authors_list_from_db.txt` and
-  `prefix_table_integrity.sh` at `$SCRIPT_DIR/../…`; it now points at the
+- **Integration path fix.**  `tests/test_build_prefix_table.sh`'s real-data
+  integration group pointed `data/fixtures/authors_list_from_db.txt` and
+  `bin/prefix_table_integrity.sh` at `$SCRIPT_DIR/../…`; it now points at the
   repository root and runs instead of skipping.
 - **Removed a stray empty `1` file** from the repository root.
 - **Tagged the release.**  Tool-prefixed tags `build_prefix_table-1.0.4`,
@@ -27,7 +37,7 @@ All notable changes to the author-toolchain scripts in this repository:
   shell suites each report one fewer check than the historical 35/29/13
   figures — the obsolete release-snapshot diff was removed.)
 
-## [utf8_prefix_generator.awk 1.1] - 2026-08-13
+## [lib/utf8_prefix_generator.awk 1.1] - 2026-08-13
 
 - **`utf8_prefix` off-by-one fix.**  The prefix slicer broke at a character's
   lead byte instead of past its continuation bytes, so under a byte locale
@@ -35,7 +45,7 @@ All notable changes to the author-toolchain scripts in this repository:
   half (e.g. `аб` became `а` plus a stray lead byte).  It now ends on a
   character boundary in both gawk string modes; UTF-8-locale output is
   unchanged (the AWK-parity group is still green).
-- **New direct regression suite (`test_utf8_prefix_generator.sh`).**  Unlike
+- **New direct regression suite (`tests/test_utf8_prefix_generator.sh`).**  Unlike
   the parity group — which only compares this script against the newer
   generator, so a bug they share could still pass — this asserts the AWK
   script's own rows: multi-byte / 3-byte / 4-byte prefix slicing, `maxlen`
@@ -45,14 +55,14 @@ All notable changes to the author-toolchain scripts in this repository:
 
 ## [toolchain] - 2026-08-13
 
-- **Restored `prefix_table_integrity.sh` to the repository root.**  The
+- **Restored `bin/prefix_table_integrity.sh` to the repository root.**  The
   validator (v1.2.1) had been parked in `_Save_Stuff/` and was absent from the
   active tree, so the generator suite's real-data integrity cross-check
   silently skipped.  It is once again a first-class toolchain component, living
   next to the generator whose output it validates.
-- **New end-to-end pipeline suite (`test_e2e_pipeline.sh`).**  Chains the three
-  stages — `build_prefix_table.sh` → `prefix_table_integrity.sh` →
-  `prefix_tree_visualizer.sh` — on the real 6,088-author list.  Asserts the
+- **New end-to-end pipeline suite (`tests/test_e2e_pipeline.sh`).**  Chains the three
+  stages — `bin/build_prefix_table.sh` → `bin/prefix_table_integrity.sh` →
+  `bin/prefix_tree_visualizer.sh` — on the real 6,088-author list.  Asserts the
   generated table is non-empty and in strict byte order, that the validator
   reports 0 criticals and checks exactly the emitted row count, that the
   renderer draws a multi-level tree (the utf8_chop fix), and that a concrete
@@ -60,13 +70,13 @@ All notable changes to the author-toolchain scripts in this repository:
   cross-tool format drift no single per-tool suite can see.
 - Suite: **11/11 checks** green under WSL on the real author list.
 
-## [prefix_tree_visualizer.sh 2.8.1] - 2026-08-11
+## [bin/prefix_tree_visualizer.sh 2.8.1] - 2026-08-11
 
 First release of the tree renderer, integrated into the toolchain.
 
-- Moves into the release package: `release/prefix_tree_visualizer.sh` (version
+- Moves into the release package: `release/bin/prefix_tree_visualizer.sh` (version
   kept in the header comment), the regression suite
-  (`release/test_prefix_tree_visualizer.sh`), and its fixtures/goldens under
+  (`release/tests/test_prefix_tree_visualizer.sh`), and its fixtures/goldens under
   `release/tests/` (`viz_mini.txt`, `viz_spaces.txt`).  The working script
   stays at the repository root.
 - **utf8_chop fix (2.8)**: the parent-prefix helper returned the reversed tail
@@ -83,30 +93,30 @@ First release of the tree renderer, integrated into the toolchain.
   plus a release-integrity check that the snapshot is byte-identical to the
   working script.
 
-## [build_prefix_table.sh 1.0.4] - 2026-08-11
+## [bin/build_prefix_table.sh 1.0.4] - 2026-08-11
 
 - **Startup banner**: every successful run prints
-  `build_prefix_table.sh v<version> (pre-order trie walker)` to **stderr**
+  `bin/build_prefix_table.sh v<version> (pre-order trie walker)` to **stderr**
   only — stdout stays byte-identical (it carries the table, often redirected
   straight into `tmp_SORTED_AUTHORS`).  A stale copy is instantly
   recognizable: it prints an older version or no banner at all.
 - The regression suite now asserts the banner (version + walker variant) on
   stderr and that it never leaks into stdout.
 
-## [build_prefix_table.sh 1.0.3] - 2026-08-11
+## [bin/build_prefix_table.sh 1.0.3] - 2026-08-11
 
 - New fixture `case_quotes.txt` + golden `quotes_x5.txt`: punctuation-leading
   names (`"Журнал …"`, `(Максимов)`) sort before all Cyrillic in byte order
   — the exact boundary the historical level-major walker violated (the
   4 byte-order warnings seen on real data).  Regression-locked.
 
-## [build_prefix_table.sh 1.0.2] - 2026-08-11
+## [bin/build_prefix_table.sh 1.0.2] - 2026-08-11
 
 First release of the prefix-table generator, integrated into the toolchain.
 
-- Moves into the release package: `release/build_prefix_table.sh` (version kept
+- Moves into the release package: `release/bin/build_prefix_table.sh` (version kept
   in the header comment), the regression suite
-  (`release/test_build_prefix_table.sh`), and its fixtures/goldens under
+  (`release/tests/test_build_prefix_table.sh`), and its fixtures/goldens under
   `release/tests/`.  The working script stays at the repository root.
 - Generates the toolchain's prefix table (`tmp_SORTED_AUTHORS` format
   `prefix<TAB>count<TAB>start<TAB>end`) with the same core logic as the tree
@@ -117,7 +127,7 @@ First release of the prefix-table generator, integrated into the toolchain.
   warnings in the integrity checker; the generator's output has zero.  Verified
   on the real 6,088-author list: 0 critical, 0 byte-order violations.
 - **AWK parity**: emits identical rows to the original
-  `utf8_prefix_generator.awk` on the same byte-sorted input (checked in the
+  `lib/utf8_prefix_generator.awk` on the same byte-sorted input (checked in the
   suite).
 - **Normalization**: CRLF endings, blank lines, and a leading UTF-8 BOM are
   stripped before sorting; all three yield byte-identical output.
@@ -131,16 +141,16 @@ First release of the prefix-table generator, integrated into the toolchain.
 
 ## [6.6.8] - 2026-08-11
 
-Release of the final, tested state of `build_shell_nested_authors.sh`.  No
+Release of the final, tested state of `bin/build_shell_nested_authors.sh`.  No
 functional changes since 6.6.7; the version increment marks the script as
 complete and release-ready.
 
-- The `V06` variant is retired; the canonical script is `build_shell_nested_authors.sh`.
-- Release package lives in `release/`: the snapshot `build_shell_nested_authors.sh`
+- The `V06` variant is retired; the canonical script is `bin/build_shell_nested_authors.sh`.
+- Release package lives in `release/`: the snapshot `bin/build_shell_nested_authors.sh`
   (version kept in the header comment, not the file name), this changelog, and a
-  self-contained regression suite (`release/test_build_shell_nested_authors.sh`).
+  self-contained regression suite (`release/tests/test_build_shell_nested_authors.sh`).
 - Full regression suite green: **29/29 checks** against the release snapshot
-  (`wsl.exe bash release/test_build_shell_nested_authors.sh`), including a
+  (`wsl.exe bash release/tests/test_build_shell_nested_authors.sh`), including a
   release-integrity check that the snapshot is byte-identical to the working script.
 - Tagged `v6.6.8`.
 
@@ -150,18 +160,18 @@ The design supports ongoing work on more tools in this repository.  Every
 released tool follows the same pattern:
 
 1. **Develop** against the working script at the repository root (e.g.
-   `build_prefix_table.sh`); it is both the source of truth and the released
+   `bin/build_prefix_table.sh`); it is both the source of truth and the released
    artifact — there is no separate `release/` snapshot.
 2. **Bump the version** in the header comment by `0.0.1` per iteration (e.g.
    `6.6.8` → `6.6.9` for the tree builder, `1.0.3` → `1.0.4` for the prefix
    table, `2.8.1` → `2.8.2` for the visualizer) and update the `Last updated`
    timestamp.
 3. **Validate**: run the regression suites at the repository root from WSL
-   (`wsl.exe bash test_build_shell_nested_authors.sh`,
-   `wsl.exe bash test_build_prefix_table.sh`,
-   `wsl.exe bash test_prefix_tree_visualizer.sh`,
-   `wsl.exe bash test_utf8_prefix_generator.sh`, and
-   `wsl.exe bash test_e2e_pipeline.sh`) — each golden, CLI, and behavioral
+   (`wsl.exe bash tests/test_build_shell_nested_authors.sh`,
+   `wsl.exe bash tests/test_build_prefix_table.sh`,
+   `wsl.exe bash tests/test_prefix_tree_visualizer.sh`,
+   `wsl.exe bash tests/test_utf8_prefix_generator.sh`, and
+   `wsl.exe bash tests/test_e2e_pipeline.sh`) — each golden, CLI, and behavioral
    check runs directly against the working script.
 4. **Commit and tag**: commit the changes, then tag the release
    (`v6.6.9`, or a tag naming the tool's version).
@@ -221,7 +231,7 @@ released tool follows the same pattern:
 ## Usage
 
 ```
-./build_shell_nested_authors.sh --input-file=FILE [OPTIONS]
+./bin/build_shell_nested_authors.sh --input-file=FILE [OPTIONS]
 ```
 
 | Option | Description | Default |
