@@ -3,16 +3,17 @@
 ###############################################################################
 # lib/merge_books_functions.sh
 #
-# Version:       0.1.0
-# Last updated:  2026-08-30 19:55
+# Version:       0.1.1
+# Last updated:  2026-08-30 20:25
 #
 # -----------------------------------------------------------------------------
 # PURPOSE
 # -----------------------------------------------------------------------------
-#   Shared functions for bin/merge_books_into_skeleton.sh: copy the direct
-#   files of every top-level author folder in a source archive into the
-#   deepest valid prefix directory of a pre-built author skeleton, without
-#   ever overwriting an existing file.
+#   Shared functions for bin/merge_books_into_skeleton.sh: copy every file
+#   of every top-level author folder in a source archive into the deepest
+#   valid prefix directory of a pre-built author skeleton, without losing
+#   the book-series structure and without overwriting anything the user has
+#   not explicitly allowed.
 #
 #   The skeleton is the source of truth for destination paths.  It is built
 #   beforehand with bin/build_shell_nested_authors.sh, e.g.:
@@ -26,16 +27,25 @@
 #   copied.  If no prefix matches, the author is reported as unmatched.
 #
 # -----------------------------------------------------------------------------
-# USAGE
+# CONFIGURATION (resolution order: flag > env var > config file > default)
 # -----------------------------------------------------------------------------
-#   Sourced by bin/merge_books_into_skeleton.sh; not meant to be executed
-#   directly.  All configuration is carried in module-level globals set by
-#   merge_parse_args:
+#   Values can come from command-line flags, environment variables, the
+#   optional config file (config/merge_books.conf, see below), or built-in
+#   defaults:
 #
 #       SOURCE_DIR      top-level author folders (one level only)
 #       SKELETON_ROOT   pre-built prefix skeleton (never modified)
 #       REPORT_DIR      where the TSV reports are written
-#       DRY_RUN         true => resolve and report, copy nothing
+#       RECURSIVE       true  => copy book-series subfolders recursively
+#                       false => direct files only (folders are skipped)
+#       OVERWRITE_POLICY  never|ask|force -- what to do when the
+#                       destination file already exists
+#
+#   Config file keys (sourced as shell assignments):
+#       MERGE_SOURCE_DIR  MERGE_SKELETON_ROOT  MERGE_REPORT_DIR
+#       MERGE_RECURSIVE (ON|OFF)  MERGE_OVERWRITE (never|ask|force)
+#   The same names work as environment variables.  --dry-run is deliberately
+#   NOT configurable: it stays a command-line safety gate.
 #
 # -----------------------------------------------------------------------------
 # ALGORITHM
@@ -52,10 +62,14 @@
 #      always yields exactly one chain per author; several distinct paths
 #      sharing the longest prefix are treated as ambiguous.
 #
-#   3. COPY each direct file into <skeleton>/<rel>/<filename> unless a file
-#      with that name already exists.  Nested source folders and non-regular
-#      files are skipped.  Every outcome is recorded once in the manifest
-#      and once in the specialised report file.
+#   3. COPY each file (recursively when RECURSIVE is on, so book-series
+#      subfolders keep their relative layout) into
+#      <skeleton>/<rel>/<relative-path> unless the destination already
+#      exists.  Empty subfolders are never created.  Existing destinations
+#      are handled per OVERWRITE_POLICY (never/ask/force); a file written
+#      twice by the same source is always skipped as a duplicate.  Every
+#      outcome is recorded once in the manifest and once in the specialised
+#      report file.
 #
 #   Prefix matching is deliberately case-sensitive, matching the skeleton
 #   builder's LC_ALL=C byte-order semantics: "Толстой" and "толстой" live
@@ -65,11 +79,14 @@
 
 set -euo pipefail
 
-# --- module state (filled by merge_parse_args) -------------------------------
+# --- module state (flags, then env, then config, then defaults) -------------
 SOURCE_DIR=""
 SKELETON_ROOT=""
 REPORT_DIR=""
+RECURSIVE=true
+OVERWRITE_POLICY="never"
 DRY_RUN=false
+CONFIG_FILE=""
 
 # --- report paths (set by merge_prepare_reports) -----------------------------
 MANIFEST=""
@@ -85,6 +102,9 @@ declare -a SKEL_DIRS=()        # "rel<TAB>prefix" rows of every skeleton dir
 declare -A DEST_SOURCE=()      # dest file -> source file that wrote it this run
 MATCH_DEST=""                  # resolved destination (relative to skeleton)
 MATCH_AMBIGUOUS=false
+
+# --- default config location (next to the repo's config/ directory) ----------
+DEFAULT_CONFIG_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/config/merge_books.conf"
 
 # -----------------------------------------------------------------------------
 # merge_sanitize
@@ -120,10 +140,16 @@ merge_usage() {
     echo "" >&2
     echo "Optional:" >&2
     echo "  -r, --report-dir=DIR  Where the TSV reports are written" >&2
-    echo "                        [default: \$PWD/merge-reports]" >&2
+    echo "      --config=FILE     Config file [default: config/merge_books.conf]" >&2
+    echo "      --recursive       Copy book-series subfolders recursively [default]" >&2
+    echo "      --no-recursive    Direct files only; subfolders are skipped" >&2
+    echo "      --overwrite=POL   Destination exists: never|ask|force [default: never]" >&2
     echo "      --dry-run         Resolve and report only; copy nothing" >&2
     echo "  -v, --version         Print the version and exit 0" >&2
     echo "  -h, --help            Show this help message" >&2
+    echo "" >&2
+    echo "Resolution order for every setting:" >&2
+    echo "  command-line flag > environment variable > config file > built-in default" >&2
 }
 
 # -----------------------------------------------------------------------------
@@ -131,10 +157,11 @@ merge_usage() {
 # -----------------------------------------------------------------------------
 # Accept named options in combined (-s=DIR), isolated (-s DIR), or spaced
 # (-s = DIR) forms; "--" ends option parsing.  Unknown options fail loudly.
+# Values already resolved from the config file / environment are only
+# replaced when the matching flag is actually present.
 # -----------------------------------------------------------------------------
 merge_parse_args() {
     local arg flag value
-    local -a positional=()
 
     while (( $# > 0 )); do
         arg="$1"
@@ -147,6 +174,34 @@ merge_parse_args() {
             -v|--version)
                 echo "merge_books_into_skeleton.sh v$(sed -n 's/^# Version:[[:space:]]*//p' "$0" | head -n 1)"
                 exit 0
+                ;;
+            --config=*)
+                CONFIG_FILE="${arg#*=}"   # already loaded by merge_load_config
+                ;;
+            --config)
+                if (( $# < 2 )); then
+                    echo "Error: --config requires a value." >&2
+                    exit 1
+                fi
+                CONFIG_FILE="$2"
+                shift
+                ;;
+            --recursive)
+                RECURSIVE=true
+                ;;
+            --no-recursive)
+                RECURSIVE=false
+                ;;
+            --overwrite=*)
+                OVERWRITE_POLICY="${arg#*=}"
+                ;;
+            --overwrite)
+                if (( $# < 2 )); then
+                    echo "Error: --overwrite requires a value." >&2
+                    exit 1
+                fi
+                OVERWRITE_POLICY="$2"
+                shift
                 ;;
             -s=*|--source=*|-k=*|--skeleton=*|-r=*|--report-dir=*)
                 flag="${arg%%=*}"
@@ -189,7 +244,20 @@ merge_parse_args() {
                 ;;
             --)
                 shift
-                positional+=("$@")
+                # Everything after "--" is positional; nothing else is
+                # consumed here (positional slots are filled below).
+                while (( $# > 0 )); do
+                    if [[ -z "$SOURCE_DIR" ]]; then
+                        SOURCE_DIR="$1"
+                    elif [[ -z "$SKELETON_ROOT" ]]; then
+                        SKELETON_ROOT="$1"
+                    else
+                        echo "Error: Too many positional arguments." >&2
+                        merge_usage
+                        exit 1
+                    fi
+                    shift
+                done
                 break
                 ;;
             -*)
@@ -198,30 +266,146 @@ merge_parse_args() {
                 exit 1
                 ;;
             *)
-                positional+=("$arg")
+                if [[ -z "$SOURCE_DIR" ]]; then
+                    SOURCE_DIR="$arg"
+                elif [[ -z "$SKELETON_ROOT" ]]; then
+                    SKELETON_ROOT="$arg"
+                else
+                    echo "Error: Too many positional arguments." >&2
+                    merge_usage
+                    exit 1
+                fi
                 ;;
         esac
 
         shift
     done
 
-    # Positional arguments fill the slots in canonical order
-    # (source, then skeleton), never overriding a named option.
-    if [[ -z "$SOURCE_DIR" ]] && (( ${#positional[@]} > 0 )); then
-        SOURCE_DIR="${positional[0]}"
-        positional=("${positional[@]:1}")
-    fi
-    if [[ -z "$SKELETON_ROOT" ]] && (( ${#positional[@]} > 0 )); then
-        SKELETON_ROOT="${positional[0]}"
-        positional=("${positional[@]:1}")
-    fi
-    if (( ${#positional[@]} > 0 )); then
-        echo "Error: Too many positional arguments." >&2
-        merge_usage
+    [[ -n "$REPORT_DIR" ]] || REPORT_DIR="$PWD/merge-reports"
+}
+
+# -----------------------------------------------------------------------------
+# merge_find_config
+# -----------------------------------------------------------------------------
+# Pre-scan the raw argument list for --config so the config file can be
+# loaded BEFORE the full parse fills in the values (flags must win).
+# -----------------------------------------------------------------------------
+merge_find_config() {
+    local arg
+    while (( $# > 0 )); do
+        arg="$1"
+        case "$arg" in
+            --config=*)
+                CONFIG_FILE="${arg#*=}"
+                ;;
+            --config)
+                if (( $# >= 2 )); then
+                    CONFIG_FILE="$2"
+                    shift
+                fi
+                ;;
+            --) break ;;
+        esac
+        shift
+    done
+}
+
+# -----------------------------------------------------------------------------
+# merge_normalize_bool
+# -----------------------------------------------------------------------------
+# Convert a config/env ON|OFF|true|false|1|0 value to true|false.  Invalid
+# values abort with a message.
+# -----------------------------------------------------------------------------
+merge_normalize_bool() {
+    case "${1^^}" in
+        ON|TRUE|1) printf 'true' ;;
+        OFF|FALSE|0) printf 'false' ;;
+        *)
+            echo "Error: MERGE_RECURSIVE must be ON or OFF, got '$1'." >&2
+            exit 1
+            ;;
+    esac
+}
+
+# -----------------------------------------------------------------------------
+# merge_normalize_overwrite
+# -----------------------------------------------------------------------------
+# Normalize a policy value to lowercase never|ask|force.  Invalid values
+# abort with a message.
+# -----------------------------------------------------------------------------
+merge_normalize_overwrite() {
+    case "${1,,}" in
+        never|ask|force) printf '%s' "${1,,}" ;;
+        *)
+            echo "Error: overwrite policy must be never, ask or force, got '$1'." >&2
+            exit 1
+            ;;
+    esac
+}
+
+# -----------------------------------------------------------------------------
+# merge_load_config
+# -----------------------------------------------------------------------------
+# Source the config file (explicit --config > $MERGE_CONFIG > the default
+# location), then let environment variables override it.  An explicitly
+# requested config file that does not exist is an error; the default file is
+# optional.  The config values are validated on the way in.
+# -----------------------------------------------------------------------------
+merge_load_config() {
+    local cfg="${CONFIG_FILE:-${MERGE_CONFIG:-$DEFAULT_CONFIG_FILE}}"
+
+    # Capture environment-provided values BEFORE sourcing the config file:
+    # a config assignment would otherwise clobber the environment variable
+    # and silently defeat the env > config precedence.
+    local env_source="${MERGE_SOURCE_DIR:-}"
+    local env_skeleton="${MERGE_SKELETON_ROOT:-}"
+    local env_report="${MERGE_REPORT_DIR:-}"
+    local env_recursive="${MERGE_RECURSIVE:-}"
+    local env_overwrite="${MERGE_OVERWRITE:-}"
+
+    if [[ -f "$cfg" ]]; then
+        # shellcheck source=/dev/null
+        source "$cfg"
+    elif [[ -n "$CONFIG_FILE" || -n "${MERGE_CONFIG:-}" ]]; then
+        echo "Error: config file '$cfg' not found." >&2
         exit 1
     fi
 
-    [[ -n "$REPORT_DIR" ]] || REPORT_DIR="$PWD/merge-reports"
+    # Config-file values (MERGE_* now holds them after the source), then
+    # environment variables override them.  if-statements (not `[[ ]] &&
+    # x=` chains): a false test must leave the function returning 0, or
+    # set -e kills the caller.
+    if [[ -n "${MERGE_SOURCE_DIR:-}" ]]; then
+        SOURCE_DIR="$MERGE_SOURCE_DIR"
+    fi
+    if [[ -n "${MERGE_SKELETON_ROOT:-}" ]]; then
+        SKELETON_ROOT="$MERGE_SKELETON_ROOT"
+    fi
+    if [[ -n "${MERGE_REPORT_DIR:-}" ]]; then
+        REPORT_DIR="$MERGE_REPORT_DIR"
+    fi
+    if [[ -n "${MERGE_RECURSIVE:-}" ]]; then
+        RECURSIVE="$(merge_normalize_bool "$MERGE_RECURSIVE")"
+    fi
+    if [[ -n "${MERGE_OVERWRITE:-}" ]]; then
+        OVERWRITE_POLICY="$(merge_normalize_overwrite "$MERGE_OVERWRITE")"
+    fi
+
+    if [[ -n "$env_source" ]]; then
+        SOURCE_DIR="$env_source"
+    fi
+    if [[ -n "$env_skeleton" ]]; then
+        SKELETON_ROOT="$env_skeleton"
+    fi
+    if [[ -n "$env_report" ]]; then
+        REPORT_DIR="$env_report"
+    fi
+    if [[ -n "$env_recursive" ]]; then
+        RECURSIVE="$(merge_normalize_bool "$env_recursive")"
+    fi
+    if [[ -n "$env_overwrite" ]]; then
+        OVERWRITE_POLICY="$(merge_normalize_overwrite "$env_overwrite")"
+    fi
 }
 
 # -----------------------------------------------------------------------------
@@ -311,11 +495,11 @@ merge_find_dest() {
 # Write one outcome row to the manifest and to the specialised report(s).
 #
 # Arguments:
-#   $1 - status: copied|would-copy|duplicate|duplicate-name|collision|
-#                unmatched-author|ambiguous-author|skipped
+#   $1 - status: copied|would-copy|overwritten|duplicate|duplicate-name|
+#                collision|unmatched-author|ambiguous-author|skipped
 #   $2 - human-readable reason
 #   $3 - source author name
-#   $4 - source file name (or "-")
+#   $4 - source file (relative to the author folder, or "-")
 #   $5 - destination path relative to the skeleton (or "-")
 # -----------------------------------------------------------------------------
 merge_record() {
@@ -332,7 +516,7 @@ merge_record() {
     printf '%s\n' "$row" >> "$MANIFEST"
 
     case "$status" in
-        copied|would-copy) ;;
+        copied|would-copy|overwritten) ;;
         *) printf '%s\n' "$row" >> "$SKIPPED_FILES" ;;
     esac
 
@@ -345,16 +529,156 @@ merge_record() {
 }
 
 # -----------------------------------------------------------------------------
+# merge_should_overwrite
+# -----------------------------------------------------------------------------
+# Decide, per OVERWRITE_POLICY, whether an existing destination file may be
+# replaced.  In 'ask' mode a non-interactive stdin behaves like 'never' so
+# a scripted run can never hang on a prompt.
+#
+# Arguments:
+#   $1 - author name (for the prompt)
+#   $2 - relative source file (for the prompt)
+# Returns 0 when overwriting is allowed, 1 otherwise.
+# -----------------------------------------------------------------------------
+merge_should_overwrite() {
+    local author="$1" src="$2" answer
+
+    case "$OVERWRITE_POLICY" in
+        force)
+            return 0
+            ;;
+        never)
+            return 1
+            ;;
+        ask)
+            if [[ ! -t 0 ]]; then
+                return 1
+            fi
+            printf 'Overwrite %s: %s? [y/N] ' "$author" "$src" >&2
+            IFS= read -r answer
+            case "${answer,,}" in
+                y|yes) return 0 ;;
+                *) return 1 ;;
+            esac
+            ;;
+    esac
+}
+
+# -----------------------------------------------------------------------------
+# merge_copy_file
+# -----------------------------------------------------------------------------
+# Copy one source file into its resolved destination, applying the
+# duplicate/collision detection and the overwrite policy.
+#
+# Arguments:
+#   $1 - author name
+#   $2 - absolute source path
+#   $3 - source file relative to the author folder (for reporting)
+#   $4 - absolute destination path
+# -----------------------------------------------------------------------------
+merge_copy_file() {
+    local author="$1" src="$2" rel="$3" target="$4"
+    local dest_rel="${target#"$SKELETON_ROOT"/}"
+    local status reason
+
+    if [[ -e "$target" ]]; then
+        # A destination written earlier THIS run by a different source is a
+        # collision; the same source twice is a true duplicate; anything
+        # else pre-existed on disk (duplicate-name).  Only collisions and
+        # pre-existing files are subject to the overwrite policy -- a true
+        # duplicate of the same source is always skipped.
+        if [[ -n "${DEST_SOURCE[$target]:-}" ]]; then
+            if [[ "${DEST_SOURCE[$target]}" == "$src" ]]; then
+                status="duplicate"
+                reason="same source file copied twice"
+            else
+                status="collision"
+                reason="destination name already written this run by ${DEST_SOURCE[$target]##*/}"
+            fi
+        else
+            status="duplicate-name"
+            reason="a file with this name already exists at the destination"
+        fi
+
+        if [[ "$status" != "duplicate" ]] && merge_should_overwrite "$author" "$rel"; then
+            if [[ "$DRY_RUN" == true ]]; then
+                DEST_SOURCE[$target]="$src"
+                merge_record "would-copy" \
+                    "dry run: would overwrite (policy $OVERWRITE_POLICY)" \
+                    "$author" "$rel" "$dest_rel"
+            else
+                if cp -p -- "$src" "$target"; then
+                    DEST_SOURCE[$target]="$src"
+                    merge_record "overwritten" \
+                        "overwrite policy: $OVERWRITE_POLICY" \
+                        "$author" "$rel" "$dest_rel"
+                else
+                    merge_record "skipped" "copy failed" \
+                        "$author" "$rel" "$dest_rel"
+                fi
+            fi
+            return
+        fi
+
+        merge_record "$status" "$reason" "$author" "$rel" "$dest_rel"
+        return
+    fi
+
+    if [[ "$DRY_RUN" == true ]]; then
+        DEST_SOURCE[$target]="$src"
+        merge_record "would-copy" "dry run: no files were copied" \
+            "$author" "$rel" "$dest_rel"
+        return
+    fi
+
+    mkdir -p -- "$(dirname "$target")"
+    if cp -p -- "$src" "$target"; then
+        DEST_SOURCE[$target]="$src"
+        merge_record "copied" "" "$author" "$rel" "$dest_rel"
+    else
+        merge_record "skipped" "copy failed" "$author" "$rel" "$dest_rel"
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# merge_record_unmatched
+# -----------------------------------------------------------------------------
+# Record every direct child of an author folder whose destination could not
+# be resolved (unmatched or ambiguous).  Nothing is copied.
+# -----------------------------------------------------------------------------
+merge_record_unmatched() {
+    local status="$1" reason="$2" author_dir="$3"
+    local author="${author_dir##*/}"
+    local -a children=()
+    local child
+
+    while IFS= read -r child; do
+        children+=("$child")
+    done < <(find "$author_dir" -mindepth 1 -maxdepth 1 | LC_ALL=C sort)
+
+    if (( ${#children[@]} == 0 )); then
+        merge_record "$status" "$reason" "$author" "-" "-"
+    else
+        for child in "${children[@]}"; do
+            merge_record "$status" "$reason" "$author" \
+                "${child##*/}" "-"
+        done
+    fi
+}
+
+# -----------------------------------------------------------------------------
 # merge_process_author
 # -----------------------------------------------------------------------------
-# Resolve one top-level source author folder and process its direct children:
-# regular files are copy candidates, directories are recorded as skipped
-# (nested folders are out of scope for the first implementation).
+# Resolve one top-level source author folder and copy its files.  With
+# RECURSIVE on, every file at any depth is copied and the relative layout
+# (book series folders) is preserved; empty subfolders are never created.
+# With RECURSIVE off, only direct files are copied and subfolders are
+# recorded as skipped.
 # -----------------------------------------------------------------------------
 merge_process_author() {
     local author_dir="$1"
     local author="${author_dir##*/}"
-    local child name target
+    local child rel target
 
     # Trim surrounding whitespace from the folder name for lookup/reporting.
     author="${author#"${author%%[![:space:]]*}"}"
@@ -364,88 +688,44 @@ merge_process_author() {
         return
     fi
 
-    if merge_find_dest "$author"; then
-        local dest_dir="$SKELETON_ROOT/$MATCH_DEST"
-    else
+    if ! merge_find_dest "$author"; then
         local status="unmatched-author"
         local reason="no skeleton prefix matches the author name"
         if [[ "$MATCH_AMBIGUOUS" == true ]]; then
             status="ambiguous-author"
             reason="several skeleton paths share the longest matching prefix"
         fi
-        # Record every direct child so the manifest is complete, but copy
-        # nothing.  An empty author folder records a single author-level row.
-        local -a children=()
-        while IFS= read -r child; do
-            children+=("$child")
-        done < <(find "$author_dir" -mindepth 1 -maxdepth 1 | LC_ALL=C sort)
-        if (( ${#children[@]} == 0 )); then
-            merge_record "$status" "$reason" "$author" "-" "-"
-        else
-            for child in "${children[@]}"; do
-                merge_record "$status" "$reason" "$author" \
-                    "${child##*/}" "-"
-            done
-        fi
+        merge_record_unmatched "$status" "$reason" "$author_dir"
         return
     fi
 
-    local child
-    while IFS= read -r child; do
-        name="${child##*/}"
+    local dest_dir="$SKELETON_ROOT/$MATCH_DEST"
 
-        if [[ -d "$child" ]]; then
-            merge_record "skipped" "nested folder (out of scope)" \
-                "$author" "$name" "-"
-            continue
-        fi
-
-        if [[ ! -f "$child" ]]; then
-            merge_record "skipped" "not a regular file" \
-                "$author" "$name" "-"
-            continue
-        fi
-
-        target="$dest_dir/$name"
-
-        if [[ -e "$target" ]]; then
-            # Written earlier THIS run by a different source file: collision
-            # (same destination name, possibly different content).  Same
-            # source file twice is a true duplicate; anything pre-existing
-            # is a duplicate-name skip (never overwrite).
-            if [[ -n "${DEST_SOURCE[$target]:-}" ]]; then
-                if [[ "${DEST_SOURCE[$target]}" == "$child" ]]; then
-                    merge_record "duplicate" "same source file copied twice" \
-                        "$author" "$name" "$MATCH_DEST/$name"
-                else
-                    merge_record "collision" \
-                        "destination name already written this run by ${DEST_SOURCE[$target]##*/}" \
-                        "$author" "$name" "$MATCH_DEST/$name"
-                fi
-            else
-                merge_record "duplicate-name" \
-                    "a file with this name already exists at the destination" \
-                    "$author" "$name" "$MATCH_DEST/$name"
+    if [[ "$RECURSIVE" == true ]]; then
+        # Every regular file at any depth; empty folders never appear.
+        while IFS= read -r child; do
+            rel="${child#"$author_dir"/}"
+            target="$dest_dir/$rel"
+            merge_copy_file "$author" "$child" "$rel" "$target"
+        done < <(find "$author_dir" -type f | LC_ALL=C sort)
+    else
+        # Direct files only; subfolders (book series) are skipped.
+        while IFS= read -r child; do
+            if [[ -d "$child" ]]; then
+                merge_record "skipped" "nested folder (recursive copy disabled)" \
+                    "$author" "${child##*/}" "-"
+                continue
             fi
-            continue
-        fi
-
-        if [[ "$DRY_RUN" == true ]]; then
-            # Register the would-be target so a later author colliding with
-            # it is reported as a collision, not as a pre-existing file.
-            DEST_SOURCE[$target]="$child"
-            merge_record "would-copy" "dry run: no files were copied" \
-                "$author" "$name" "$MATCH_DEST/$name"
-        else
-            if cp -p -- "$child" "$target"; then
-                DEST_SOURCE[$target]="$child"
-                merge_record "copied" "" "$author" "$name" "$MATCH_DEST/$name"
-            else
-                merge_record "skipped" "copy failed" \
-                    "$author" "$name" "$MATCH_DEST/$name"
+            if [[ ! -f "$child" ]]; then
+                merge_record "skipped" "not a regular file" \
+                    "$author" "${child##*/}" "-"
+                continue
             fi
-        fi
-    done < <(find "$author_dir" -mindepth 1 -maxdepth 1 | LC_ALL=C sort)
+            rel="${child##*/}"
+            target="$dest_dir/$rel"
+            merge_copy_file "$author" "$child" "$rel" "$target"
+        done < <(find "$author_dir" -mindepth 1 -maxdepth 1 | LC_ALL=C sort)
+    fi
 }
 
 # -----------------------------------------------------------------------------
@@ -476,19 +756,23 @@ merge_prepare_reports() {
 # -----------------------------------------------------------------------------
 # merge_main
 # -----------------------------------------------------------------------------
-# Program entry point: parse, validate, collect the skeleton, process every
-# author folder, and print a summary.
+# Program entry point: load configuration, parse, validate, collect the
+# skeleton, process every author folder, and print a summary.
 # -----------------------------------------------------------------------------
 merge_main() {
+    merge_find_config "$@"
+    merge_load_config
     merge_parse_args "$@"
 
+    OVERWRITE_POLICY="$(merge_normalize_overwrite "$OVERWRITE_POLICY")"
+
     if [[ -z "$SOURCE_DIR" ]]; then
-        echo "Error: no source directory given (--source)." >&2
+        echo "Error: no source directory given (--source or MERGE_SOURCE_DIR)." >&2
         merge_usage
         exit 1
     fi
     if [[ -z "$SKELETON_ROOT" ]]; then
-        echo "Error: no skeleton directory given (--skeleton)." >&2
+        echo "Error: no skeleton directory given (--skeleton or MERGE_SKELETON_ROOT)." >&2
         merge_usage
         exit 1
     fi
@@ -511,6 +795,7 @@ merge_main() {
     echo "  source:   $SOURCE_DIR"
     echo "  skeleton: $SKELETON_ROOT"
     echo "  reports:  $REPORT_DIR"
+    echo "  recursive: $RECURSIVE   overwrite: $OVERWRITE_POLICY"
     if [[ "$DRY_RUN" == true ]]; then
         echo "  mode:     DRY RUN - nothing will be copied"
     fi
@@ -522,9 +807,10 @@ merge_main() {
     done < <(find "$SOURCE_DIR" -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort)
 
     # Summary counts, derived from the manifest rows (excluding the header).
-    local total copied dup dupname coll unmatched amb skipped
+    local total copied dup dupname coll unmatched amb overwritten skipped
     total="$(awk 'NR>1 {n++} END{print n+0}' "$MANIFEST")"
     copied="$(awk -F '\t' 'NR>1 && $5=="copied" {n++} END{print n+0}' "$MANIFEST")"
+    overwritten="$(awk -F '\t' 'NR>1 && $5=="overwritten" {n++} END{print n+0}' "$MANIFEST")"
     dup="$(awk -F '\t' 'NR>1 && $5=="duplicate" {n++} END{print n+0}' "$MANIFEST")"
     dupname="$(awk -F '\t' 'NR>1 && $5=="duplicate-name" {n++} END{print n+0}' "$MANIFEST")"
     coll="$(awk -F '\t' 'NR>1 && $5=="collision" {n++} END{print n+0}' "$MANIFEST")"
@@ -534,7 +820,8 @@ merge_main() {
 
     echo ""
     echo "authors: $authors   records: $total"
-    echo "  copied: $copied   duplicate: $dup   duplicate-name: $dupname"
-    echo "  collision: $coll   unmatched: $unmatched   ambiguous: $amb   skipped: $skipped"
+    echo "  copied: $copied   overwritten: $overwritten"
+    echo "  duplicate: $dup   duplicate-name: $dupname   collision: $coll"
+    echo "  unmatched: $unmatched   ambiguous: $amb   skipped: $skipped"
     echo "reports written to $REPORT_DIR"
 }

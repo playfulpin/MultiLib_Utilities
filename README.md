@@ -107,11 +107,12 @@ Options: `-m/--min-authors` (default 10), `-x/--max-prefix` (default 5),
 
 ### `bin/merge_books_into_skeleton.sh`
 
-Copies the direct files of every top-level author folder in a legacy archive
-into the **deepest valid prefix directory** of a pre-built skeleton. The
-skeleton is the source of truth and is never modified; existing destination
-files are never overwritten. See `docs/BOOK_LIBRARY_MERGE_PLAN.md` for the
-full design.
+Copies the files of every top-level author folder in a legacy archive into
+the **deepest valid prefix directory** of a pre-built skeleton. Book-series
+subfolders are copied recursively by default, preserving their relative
+layout. The skeleton is the source of truth and is never modified; existing
+destination files are never overwritten unless the user allows it. See
+`docs/BOOK_LIBRARY_MERGE_PLAN.md` for the full design.
 
 ```bash
 ./bin/merge_books_into_skeleton.sh \
@@ -122,11 +123,20 @@ full design.
 ```
 
 Options: `-s/--source`, `-k/--skeleton`, `-r/--report-dir` (default
-`$PWD/merge-reports`), `--dry-run` (resolve and report, copy nothing),
-`-v/--version`, `-h/--help`. Reports are written as TSV files:
-`merge-manifest.tsv`, `unmatched-authors.tsv`, `ambiguous-authors.tsv`,
-`collisions.tsv`, `duplicates.tsv`, and `skipped-files.tsv`. Always run
-`--dry-run` first and review the reports before a real copy.
+`$PWD/merge-reports`), `--config FILE`, `--recursive` / `--no-recursive`,
+`--overwrite never|ask|force`, `--dry-run` (resolve and report, copy
+nothing), `-v/--version`, `-h/--help`.
+
+Every setting resolves **flag > environment variable > config file > built-in
+default**. The optional `config/merge_books.conf` holds the source, skeleton,
+report directory, recursive behavior, and overwrite policy; the same keys
+work as environment variables (`MERGE_SOURCE_DIR`, `MERGE_SKELETON_ROOT`, ...).
+`--dry-run` is intentionally not configurable.
+
+Reports are written as TSV files: `merge-manifest.tsv`,
+`unmatched-authors.tsv`, `ambiguous-authors.tsv`, `collisions.tsv`,
+`duplicates.tsv`, and `skipped-files.tsv`. Always run `--dry-run` first and
+review the reports before a real copy.
 
 Unlike the UTF-8-slicing tools, this script compares prefixes byte-wise
 (exact for UTF-8), so it runs under both Cygwin/MSYS bash and WSL.
@@ -174,7 +184,7 @@ Releases are tagged with a tool-prefixed name:
 | `bin/prefix_table_integrity.sh` | 1.2.1 | `prefix_table_integrity-1.2.1` |
 | `bin/prefix_tree_visualizer.sh` | 2.8.1 | `v2.8.1` |
 | `bin/build_shell_nested_authors.sh` | 6.6.8 | `v6.6.8` |
-| `bin/merge_books_into_skeleton.sh` | 0.1.0 | `merge_books_into_skeleton-0.1.0` |
+| `bin/merge_books_into_skeleton.sh` | 0.1.1 | `merge_books_into_skeleton-0.1.1` |
 | `lib/utf8_prefix_generator.awk` | 1.1 | `utf8_prefix_generator-1.1` |
 
 `v2.8.1` and `v6.6.8` predate the tool-prefixed convention.
@@ -193,6 +203,7 @@ bin/build_shell_nested_authors.sh   nested-directory builder
 bin/merge_books_into_skeleton.sh    archive -> skeleton merge tool
 lib/merge_books_functions.sh        shared functions for the merge tool
 lib/utf8_prefix_generator.awk       original AWK generator (parity reference)
+config/merge_books.conf             defaults for the merge tool (paths + behavior)
 
 tests/test_*.sh                 regression suites (one per tool + e2e)
 tests/                          fixtures and golden files

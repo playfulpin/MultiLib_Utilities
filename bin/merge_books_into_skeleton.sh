@@ -3,20 +3,30 @@
 ###############################################################################
 # bin/merge_books_into_skeleton.sh
 #
-# Version:       0.1.0
-# Last updated:  2026-08-30 19:55
+# Version:       0.1.1
+# Last updated:  2026-08-30 20:25
 #
 # -----------------------------------------------------------------------------
 # PURPOSE
 # -----------------------------------------------------------------------------
 #   Merge a legacy book archive into a pre-built author-prefix skeleton.
 #   Every top-level folder of the source archive is treated as an author;
-#   its DIRECT files are copied into the deepest skeleton prefix directory
-#   that matches the beginning of the author name.
+#   its files are copied into the deepest skeleton prefix directory that
+#   matches the beginning of the author name.  Book-series subfolders are
+#   copied recursively by default, preserving their relative layout.
 #
 #   The skeleton is the source of truth and is never modified (no new
-#   directories, no overwrites).  See docs/BOOK_LIBRARY_MERGE_PLAN.md for
-#   the full design.
+#   directories, no unapproved overwrites).  See
+#   docs/BOOK_LIBRARY_MERGE_PLAN.md for the full design.
+#
+# -----------------------------------------------------------------------------
+# CONFIGURATION
+# -----------------------------------------------------------------------------
+#   Every setting resolves flag > env var > config file > built-in default.
+#   The optional config file is config/merge_books.conf (keys:
+#   MERGE_SOURCE_DIR, MERGE_SKELETON_ROOT, MERGE_REPORT_DIR,
+#   MERGE_RECURSIVE, MERGE_OVERWRITE).  --dry-run is intentionally not
+#   configurable.
 #
 # -----------------------------------------------------------------------------
 # USAGE
@@ -28,7 +38,8 @@
 #       --dry-run
 #
 #   Always run --dry-run first and review the reports before a real copy.
-#   The real copy omits --dry-run.
+#   The real copy omits --dry-run.  Use --no-recursive to copy only direct
+#   files, and --overwrite=force to replace existing destination files.
 #
 # -----------------------------------------------------------------------------
 # REPORTS (written to REPORT_DIR)

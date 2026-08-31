@@ -7,26 +7,40 @@ All notable changes to the author-toolchain scripts in this repository:
 
 ## [Unreleased] - 2026-08-30
 
-- **First implementation of the merge tool.**  `bin/merge_books_into_skeleton.sh`
-  (v0.1.0) plus `lib/merge_books_functions.sh` now copy the direct files of
-  every top-level author folder in a legacy archive into the deepest matching
-  prefix directory of a pre-built skeleton, per `docs/BOOK_LIBRARY_MERGE_PLAN.md`:
+- **Merge tool v0.1.1.**  `bin/merge_books_into_skeleton.sh` plus
+  `lib/merge_books_functions.sh` copy every top-level author folder of a
+  legacy archive into the deepest matching prefix directory of a pre-built
+  skeleton, per `docs/BOOK_LIBRARY_MERGE_PLAN.md`:
   - The skeleton is the source of truth: prefixes are matched byte-wise against
     the author name (exact for UTF-8 in Cygwin and WSL bash), the longest
     match wins, and distinct paths sharing it are reported as ambiguous.
-  - Copy-only: the source archive is never modified, existing destination
-    files are never overwritten, and re-runs are idempotent (duplicate-name).
-  - Direct files only: mixed formats (`.fb2`, `.epub`, `.zip`, `.txt`, ...) are
-    copied as-is; nested source folders are recorded as skipped.
+  - **Recursive series copy (default).**  Subfolders under an author are book
+    series and are copied with their relative layout preserved
+    (`Серия/том1.fb2` lands inside the author's prefix directory); empty
+    subfolders are never created.  `--no-recursive` restores the direct-files-
+    only behavior and records subfolders as skipped.
+  - **Overwrite policy.**  Existing destination files are handled per
+    `--overwrite never|ask|force` (default `never`): `force` replaces and
+    records status `overwritten`, `ask` prompts per file (non-interactive
+    runs behave like `never`).  A file copied twice from the same source is
+    always skipped as a duplicate.
+  - **Config file.**  `config/merge_books.conf` supplies defaults for the
+    source, skeleton, report directory, recursion, and overwrite policy;
+    every setting resolves flag > environment variable > config file > built-
+    in default.  `--dry-run` is intentionally not configurable.
+  - Copy-only: the source archive is never modified, and re-runs are
+    idempotent (duplicate-name).  Mixed formats (`.fb2`, `.epub`, `.zip`,
+    `.txt`, ...) are copied as-is.
   - Six TSV reports are written to `--report-dir`: `merge-manifest.tsv`,
     `unmatched-authors.tsv`, `ambiguous-authors.tsv`, `collisions.tsv`,
     `duplicates.tsv`, and `skipped-files.tsv`.
   - `--dry-run` resolves every author and writes the reports without touching
     the skeleton; run it first and review before a real copy.
-  - New suite `tests/test_merge_books_into_skeleton.sh`: 31/31 checks green
+  - New suite `tests/test_merge_books_into_skeleton.sh`: 42/42 checks green
     (dry run, full run, duplicate-name, collision, re-run idempotency,
-    ambiguous, CLI, version headers).  Unlike the UTF-8-slicing suites, it
-    runs under both Cygwin/MSYS bash and WSL.
+    no-recursive, overwrite force/ask, config/env/flags precedence, ambiguous,
+    CLI, version headers).  Unlike the UTF-8-slicing suites, it runs under
+    both Cygwin/MSYS bash and WSL.
 
 - Added `docs/BOOK_LIBRARY_MERGE_PLAN.md`, documenting the approved next
   phase: build the author-prefix skeleton, resolve archive authors to the

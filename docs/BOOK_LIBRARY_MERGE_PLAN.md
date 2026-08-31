@@ -80,7 +80,7 @@ ambiguity is resolved.
 
 ## Phase 3: copy books
 
-The planned command is:
+The command is:
 
 ```bash
 ./bin/merge_books_into_skeleton.sh \
@@ -90,32 +90,38 @@ The planned command is:
   --dry-run
 ```
 
-The first implementation will:
+The implementation (v0.1.1):
 
-- process direct author folders under `Author/`;
-- process direct files inside each author folder;
-- leave nested source folders out of scope;
-- copy files rather than move or link them;
-- support mixed book formats without unpacking archives;
-- preserve source filenames;
-- leave the source archive unchanged;
-- copy into the deepest valid prefix directory;
-- avoid overwriting existing destination files;
-- remain safe to repeat.
+- processes direct author folders under `Author/`;
+- copies every file of an author **recursively by default**: subfolders are
+  book series and keep their relative layout inside the destination prefix
+  directory (`Серия/том1.fb2` lands next to the author's other books);
+- `--no-recursive` copies direct files only and records subfolders as skipped;
+- empty subfolders are never created;
+- copies files rather than moving or linking them;
+- supports mixed book formats without unpacking archives;
+- preserves source filenames and the series layout;
+- leaves the source archive unchanged;
+- copies into the deepest valid prefix directory;
+- never overwrites without permission (policy `never` by default);
+- remains safe to repeat.
 
 Multi-author expansion is deliberately out of scope for this first merge
 operation. It can be added later when the metadata and identity rules are
 confirmed.
 
-## Duplicate and collision policy
+## Duplicate, collision, and overwrite policy
 
-The initial requested policy is destination filename matching:
+Duplicate detection uses destination filename matching:
 
 - If the destination filename does not exist, copy the file.
-- If the same filename already exists at the destination, skip the copy.
-- Never overwrite silently.
+- If the same filename already exists, the **overwrite policy** decides:
+  - `never` (default) — skip the copy and record it;
+  - `ask` — prompt per file (non-interactive runs behave like `never`);
+  - `force` — replace it and record status `overwritten`.
+- A file written twice by the same source is always skipped as a duplicate.
+- Same-name cases from different sources are recorded as collisions.
 - Record every skipped duplicate.
-- Record same-name cases that may represent different content as collisions.
 
 Filename-only comparison is not content-safe: unrelated books may share a
 filename. A future improvement should use size plus SHA-256 verification before
@@ -143,6 +149,13 @@ processed_at  source_author  source_file  destination_file  status  reason
 Possible statuses include `copied`, `duplicate-name`, `collision`,
 `unmatched-author`, `ambiguous-author`, and `skipped`.
 
+## Configuration
+
+`config/merge_books.conf` supplies defaults for the source, skeleton, report
+directory, recursive behavior, and overwrite policy. Every setting resolves
+**flag > environment variable > config file > built-in default**. `--dry-run`
+is deliberately not configurable — it stays a command-line safety gate.
+
 ## Safety and rollout
 
 Run the following sequence:
@@ -154,8 +167,8 @@ Run the following sequence:
 5. Run the real copy only after the dry-run report is acceptable.
 6. Preserve the manifest for audit and future resume operations.
 
-The first real copy should not use `--force` unless overwrite behavior is
-explicitly implemented and reviewed.
+`--overwrite=force` is implemented and reviewed, but treat it as the exception:
+`never` is the safe default and `ask` prompts per file.
 
 ## Implementation
 
@@ -168,11 +181,12 @@ tests/test_merge_books_into_skeleton.sh
 ```
 
 The suite covers normal authors, Cyrillic names, duplicate filenames,
-collisions, unmatched authors, ambiguous matches, nested folders, mixed
-extensions, dry-run behavior, and repeated execution (31/31 checks).
+collisions, unmatched authors, ambiguous matches, recursive series copy,
+`--no-recursive`, overwrite policies, config-file loading, mixed extensions,
+dry-run behavior, and repeated execution (42/42 checks).
 
 Statuses used in the reports: `copied`, `would-copy` (dry run),
-`duplicate-name` (destination name already existed), `duplicate` (same source
-copied twice), `collision` (destination name written this run by a different
-source), `unmatched-author`, `ambiguous-author`, and `skipped` (nested folders
-and failed copies).
+`overwritten`, `duplicate-name` (destination name already existed),
+`duplicate` (same source copied twice), `collision` (destination name written
+this run by a different source), `unmatched-author`, `ambiguous-author`, and
+`skipped` (failed copies, or subfolders under `--no-recursive`).
