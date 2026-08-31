@@ -3,8 +3,8 @@
 ###############################################################################
 # lib/merge_books_functions.sh
 #
-# Version:       0.1.1
-# Last updated:  2026-08-30 20:25
+# Version:       0.1.2
+# Last updated:  2026-08-30 21:00
 #
 # -----------------------------------------------------------------------------
 # PURPOSE
@@ -26,6 +26,15 @@
 #   longest prefix, the author is reported as ambiguous and nothing is
 #   copied.  If no prefix matches, the author is reported as unmatched.
 #
+#   The author itself becomes a DIRECTORY under that prefix, so books never
+#   collide between authors that share a prefix:
+#
+#       source:  Абби Линн/Magic The Gathering/0Мироходец.zip
+#       dest:    А/Аб/Абби Линн/Magic The Gathering/0Мироходец.zip
+#
+#   Windows metadata files (desktop.ini, Thumbs.db by default) are never
+#   copied; the list is configurable via MERGE_SKIP_NAMES.
+#
 # -----------------------------------------------------------------------------
 # CONFIGURATION (resolution order: flag > env var > config file > default)
 # -----------------------------------------------------------------------------
@@ -40,10 +49,13 @@
 #                       false => direct files only (folders are skipped)
 #       OVERWRITE_POLICY  never|ask|force -- what to do when the
 #                       destination file already exists
+#       SKIP_NAMES      space-separated basenames that are never copied
+#                       (Windows metadata; default: desktop.ini Thumbs.db)
 #
 #   Config file keys (sourced as shell assignments):
 #       MERGE_SOURCE_DIR  MERGE_SKELETON_ROOT  MERGE_REPORT_DIR
 #       MERGE_RECURSIVE (ON|OFF)  MERGE_OVERWRITE (never|ask|force)
+#       MERGE_SKIP_NAMES (space-separated basenames)
 #   The same names work as environment variables.  --dry-run is deliberately
 #   NOT configurable: it stays a command-line safety gate.
 #
@@ -85,6 +97,8 @@ SKELETON_ROOT=""
 REPORT_DIR=""
 RECURSIVE=true
 OVERWRITE_POLICY="never"
+# Space-separated basenames that are never copied (Windows metadata).
+SKIP_NAMES="desktop.ini Thumbs.db"
 DRY_RUN=false
 CONFIG_FILE=""
 
@@ -100,6 +114,7 @@ PROCESSED_AT=""
 # --- run-time state ----------------------------------------------------------
 declare -a SKEL_DIRS=()        # "rel<TAB>prefix" rows of every skeleton dir
 declare -A DEST_SOURCE=()      # dest file -> source file that wrote it this run
+declare -a SKIP_NAME_ARRAY=()  # basenames that are never copied (lowercased)
 MATCH_DEST=""                  # resolved destination (relative to skeleton)
 MATCH_AMBIGUOUS=false
 
@@ -362,6 +377,7 @@ merge_load_config() {
     local env_report="${MERGE_REPORT_DIR:-}"
     local env_recursive="${MERGE_RECURSIVE:-}"
     local env_overwrite="${MERGE_OVERWRITE:-}"
+    local env_skip_names="${MERGE_SKIP_NAMES:-}"
 
     if [[ -f "$cfg" ]]; then
         # shellcheck source=/dev/null
@@ -403,9 +419,44 @@ merge_load_config() {
     if [[ -n "$env_recursive" ]]; then
         RECURSIVE="$(merge_normalize_bool "$env_recursive")"
     fi
+    if [[ -n "${MERGE_SKIP_NAMES:-}" ]]; then
+        SKIP_NAMES="$MERGE_SKIP_NAMES"
+    fi
+    if [[ -n "$env_skip_names" ]]; then
+        SKIP_NAMES="$env_skip_names"
+    fi
     if [[ -n "$env_overwrite" ]]; then
         OVERWRITE_POLICY="$(merge_normalize_overwrite "$env_overwrite")"
     fi
+}
+
+# -----------------------------------------------------------------------------
+# merge_load_skip_names
+# -----------------------------------------------------------------------------
+# Split the SKIP_NAMES string into the SKIP_NAME_ARRAY used for matching.
+# Called after configuration is resolved (config value, then env override).
+# -----------------------------------------------------------------------------
+merge_load_skip_names() {
+    local name
+    SKIP_NAME_ARRAY=()
+    for name in $SKIP_NAMES; do
+        [[ -n "$name" ]] && SKIP_NAME_ARRAY+=("${name,,}")
+    done
+}
+
+# -----------------------------------------------------------------------------
+# merge_is_skipped_name
+# -----------------------------------------------------------------------------
+# Return 0 when a basename is on the skip list (case-insensitive).  Used to
+# keep Windows metadata files like desktop.ini / Thumbs.db out of the
+# library entirely.
+# -----------------------------------------------------------------------------
+merge_is_skipped_name() {
+    local base="${1,,}" name
+    for name in "${SKIP_NAME_ARRAY[@]}"; do
+        [[ "$base" == "$name" ]] && return 0
+    done
+    return 1
 }
 
 # -----------------------------------------------------------------------------
@@ -581,6 +632,13 @@ merge_copy_file() {
     local dest_rel="${target#"$SKELETON_ROOT"/}"
     local status reason
 
+    # Windows metadata files (desktop.ini, Thumbs.db, ...) are never copied.
+    if merge_is_skipped_name "${rel##*/}"; then
+        merge_record "skipped" "Windows metadata file (skip list)" \
+            "$author" "$rel" "$dest_rel"
+        return
+    fi
+
     if [[ -e "$target" ]]; then
         # A destination written earlier THIS run by a different source is a
         # collision; the same source twice is a true duplicate; anything
@@ -684,7 +742,7 @@ merge_process_author() {
     author="${author#"${author%%[![:space:]]*}"}"
     author="${author%"${author##*[![:space:]]}"}"
 
-    if [[ -z "$author" ]]; then
+    if [[ -z "$author" || "$author" == "." || "$author" == ".." ]]; then
         return
     fi
 
@@ -699,7 +757,16 @@ merge_process_author() {
         return
     fi
 
-    local dest_dir="$SKELETON_ROOT/$MATCH_DEST"
+    # The author becomes its own directory under the deepest matching prefix,
+    # so authors that share a prefix never collide their books together.  If
+    # the matched prefix is already the author's own name, it IS that folder
+    # (created earlier, or a pre-built one) -- do not append it a second time.
+    local dest_dir
+    if [[ "${MATCH_DEST##*/}" == "$author" ]]; then
+        dest_dir="$SKELETON_ROOT/$MATCH_DEST"
+    else
+        dest_dir="$SKELETON_ROOT/$MATCH_DEST/$author"
+    fi
 
     if [[ "$RECURSIVE" == true ]]; then
         # Every regular file at any depth; empty folders never appear.
@@ -765,6 +832,7 @@ merge_main() {
     merge_parse_args "$@"
 
     OVERWRITE_POLICY="$(merge_normalize_overwrite "$OVERWRITE_POLICY")"
+    merge_load_skip_names
 
     if [[ -z "$SOURCE_DIR" ]]; then
         echo "Error: no source directory given (--source or MERGE_SOURCE_DIR)." >&2
@@ -796,6 +864,7 @@ merge_main() {
     echo "  skeleton: $SKELETON_ROOT"
     echo "  reports:  $REPORT_DIR"
     echo "  recursive: $RECURSIVE   overwrite: $OVERWRITE_POLICY"
+    echo "  skip:     ${SKIP_NAMES:-<none>}"
     if [[ "$DRY_RUN" == true ]]; then
         echo "  mode:     DRY RUN - nothing will be copied"
     fi

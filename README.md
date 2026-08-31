@@ -107,10 +107,18 @@ Options: `-m/--min-authors` (default 10), `-x/--max-prefix` (default 5),
 
 ### `bin/merge_books_into_skeleton.sh`
 
-Copies the files of every top-level author folder in a legacy archive into
-the **deepest valid prefix directory** of a pre-built skeleton. Book-series
-subfolders are copied recursively by default, preserving their relative
-layout. The skeleton is the source of truth and is never modified; existing
+Copies the files of every top-level author folder in a legacy archive into a
+directory named after the author, placed under the **deepest valid prefix
+** of a pre-built skeleton:
+
+```text
+source:  Абби Линн/Magic The Gathering/0Мироходец.zip
+dest:    А/Аб/Абби Линн/Magic The Gathering/0Мироходец.zip
+```
+
+Book-series subfolders are copied recursively by default, preserving their
+relative layout. Windows metadata files (`desktop.ini`, `Thumbs.db` by
+default) are never copied. The skeleton itself is never modified; existing
 destination files are never overwritten unless the user allows it. See
 `docs/BOOK_LIBRARY_MERGE_PLAN.md` for the full design.
 
@@ -129,9 +137,10 @@ nothing), `-v/--version`, `-h/--help`.
 
 Every setting resolves **flag > environment variable > config file > built-in
 default**. The optional `config/merge_books.conf` holds the source, skeleton,
-report directory, recursive behavior, and overwrite policy; the same keys
-work as environment variables (`MERGE_SOURCE_DIR`, `MERGE_SKELETON_ROOT`, ...).
-`--dry-run` is intentionally not configurable.
+report directory, recursive behavior, overwrite policy, and the skip list
+(`MERGE_SKIP_NAMES`); the same keys work as environment variables
+(`MERGE_SOURCE_DIR`, `MERGE_SKELETON_ROOT`, ...). `--dry-run` is
+intentionally not configurable.
 
 Reports are written as TSV files: `merge-manifest.tsv`,
 `unmatched-authors.tsv`, `ambiguous-authors.tsv`, `collisions.tsv`,

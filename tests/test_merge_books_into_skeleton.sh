@@ -4,21 +4,24 @@
 # tests/test_merge_books_into_skeleton.sh
 #
 # Regression suite for bin/merge_books_into_skeleton.sh: copy the files of
-# every top-level archive author folder into the deepest matching prefix
-# directory of a pre-built skeleton, preserving book-series subfolders and
-# never overwriting anything the user has not explicitly allowed.
+# every top-level archive author folder into a directory named after the
+# author, placed under the deepest matching prefix of a pre-built skeleton,
+# preserving book-series subfolders and never overwriting anything the user
+# has not explicitly allowed.
 #
 # Coverage:
 #   * DRY RUN   -- resolves every author, writes all six reports, creates no
 #                 skeleton directories and copies nothing (status would-copy).
-#   * FULL RUN  -- mixed extensions (.fb2/.epub/.zip/.txt) land in the right
-#                 prefix dirs with content intact; book-series subfolders are
-#                 copied recursively; unmatched authors are reported and
-#                 left untouched.
+#   * FULL RUN  -- mixed extensions (.fb2/.epub/.zip/.txt) land under the
+#                 author folder inside the right prefix dir with content
+#                 intact; book-series subfolders are copied recursively;
+#                 unmatched authors are reported and left untouched.
+#   * SKIP      -- Windows metadata (desktop.ini, Thumbs.db) is never copied.
 #   * DUPLICATE -- a pre-existing destination file is never overwritten
 #                 (policy never) and is recorded as duplicate-name.
-#   * COLLISION -- two authors mapping to the same prefix dir with the same
-#                 book name: first copy wins, second is recorded as collision.
+#   * COLLISION -- two source folders that resolve to the same author folder
+#                 with the same book name: first copy wins, second is
+#                 recorded as collision.
 #   * RE-RUN    -- repeating the same merge is idempotent: every file is a
 #                 duplicate-name skip and contents stay unchanged.
 #   * NO-RECURSIVE -- --no-recursive copies direct files only and records
@@ -121,7 +124,7 @@ count_rows() { # report
 # build_basic_fixtures <dir> [precreate_book]
 #   dir          - destination root for skeleton/ and source/Author/
 #   precreate_book - if "old", a destination file with OLD content is placed
-#                    at Т/То/Толс/Война и мир.fb2 before the merge runs
+#                    at the author folder's Война и мир.fb2 before merging
 build_basic_fixtures() {
     local base="$1" precreate="${2:-}"
     local skeleton="$base/skeleton" source="$base/source/Author"
@@ -135,7 +138,9 @@ build_basic_fixtures() {
     printf 'epub\n' > "$source/Толстой Лев Николаевич/Анна Каренина.epub"
     printf 'zip\n'  > "$source/Толстой Лев Николаевич/collection.zip"
     printf 'txt\n'  > "$source/Толстой Лев Николаевич/notes.txt"
+    printf 'meta\n' > "$source/Толстой Лев Николаевич/desktop.ini"
     printf 'nested\n' > "$source/Толстой Лев Николаевич/Серия Война и мир/secret.fb2"
+    printf 'meta\n' > "$source/Толстой Лев Николаевич/Серия Война и мир/desktop.ini"
 
     mkdir -p "$source/Абрамов Александр Иванович"
     printf 'book\n' > "$source/Абрамов Александр Иванович/Рассказы.fb2"
@@ -144,7 +149,8 @@ build_basic_fixtures() {
     printf 'x\n' > "$source/Неизвестный Автор/thing.fb2"
 
     if [[ "$precreate" == "old" ]]; then
-        printf 'OLD\n' > "$skeleton/Т/То/Толс/Война и мир.fb2"
+        mkdir -p "$skeleton/Т/То/Толс/Толстой Лев Николаевич"
+        printf 'OLD\n' > "$skeleton/Т/То/Толс/Толстой Лев Николаевич/Война и мир.fb2"
     fi
 }
 
@@ -187,22 +193,23 @@ run_dry_run_tests() {
         report "dry_run_manifest_written" fail "merge-manifest.tsv missing"
     fi
 
-    # 5 direct files + 1 series file would-copy, 0 skipped, 1 unmatched.
+    # 6 real files would-copy, 2 desktop.ini skipped, 1 unmatched.
     local wc sk un
     wc="$(count_status "$reports/merge-manifest.tsv" "would-copy")"
     sk="$(count_status "$reports/merge-manifest.tsv" "skipped")"
     un="$(count_status "$reports/merge-manifest.tsv" "unmatched-author")"
-    if (( wc == 6 && sk == 0 && un == 1 )); then
+    if (( wc == 6 && sk == 2 && un == 1 )); then
         report "dry_run_statuses" ok
     else
-        report "dry_run_statuses" fail "would-copy=$wc skipped=$sk unmatched=$un (expect 6/0/1)"
+        report "dry_run_statuses" fail "would-copy=$wc skipped=$sk unmatched=$un (expect 6/2/1)"
     fi
 
-    # The series book resolves to its recursive destination path.
-    if grep -q "Серия Война и мир/secret.fb2" "$reports/merge-manifest.tsv"; then
-        report "dry_run_series_resolved" ok
+    # The author resolves into its own folder under the prefix.
+    if grep -q "Т/То/Толс/Толстой Лев Николаевич/Серия Война и мир/secret.fb2" \
+        "$reports/merge-manifest.tsv"; then
+        report "dry_run_author_folder" ok
     else
-        report "dry_run_series_resolved" fail "series file missing from manifest"
+        report "dry_run_author_folder" fail "author folder missing from destination path"
     fi
 
     if grep -q "Неизвестный Автор" "$reports/unmatched-authors.tsv"; then
@@ -213,12 +220,13 @@ run_dry_run_tests() {
 }
 
 ###############################################################################
-# full run: mixed formats + series land in the right prefix dirs
+# full run: mixed formats + series land under the author in the prefix dirs
 ###############################################################################
 run_full_run_tests() {
     echo "== full run =="
     local base="$TMPDIR/full" out="$TMPDIR/full_out.txt" err="$TMPDIR/full_err.txt"
     local reports="$TMPDIR/full_reports"
+    local tol="$base/skeleton/Т/То/Толс/Толстой Лев Николаевич"
     build_basic_fixtures "$base"
 
     run_merge "$out" "$err" -- \
@@ -234,21 +242,27 @@ run_full_run_tests() {
     fi
 
     local ok=true
-    [[ "$(cat "$base/skeleton/Т/То/Толс/Война и мир.fb2")" == "fb2" ]] || ok=false
-    [[ "$(cat "$base/skeleton/Т/То/Толс/Анна Каренина.epub")" == "epub" ]] || ok=false
-    [[ "$(cat "$base/skeleton/Т/То/Толс/collection.zip")" == "zip" ]] || ok=false
-    [[ "$(cat "$base/skeleton/Т/То/Толс/notes.txt")" == "txt" ]] || ok=false
-    [[ "$(cat "$base/skeleton/А/Аб/Абр/Абра/Рассказы.fb2")" == "book" ]] || ok=false
+    [[ "$(cat "$tol/Война и мир.fb2")" == "fb2" ]] || ok=false
+    [[ "$(cat "$tol/Анна Каренина.epub")" == "epub" ]] || ok=false
+    [[ "$(cat "$tol/collection.zip")" == "zip" ]] || ok=false
+    [[ "$(cat "$tol/notes.txt")" == "txt" ]] || ok=false
+    [[ "$(cat "$base/skeleton/А/Аб/Абр/Абра/Абрамов Александр Иванович/Рассказы.fb2")" == "book" ]] || ok=false
     if [[ "$ok" == true ]]; then
         report "full_run_mixed_formats_copied" ok
     else
         report "full_run_mixed_formats_copied" fail "a copied file is missing or has wrong content"
     fi
 
-    if [[ "$(cat "$base/skeleton/Т/То/Толс/Серия Война и мир/secret.fb2")" == "nested" ]]; then
+    if [[ "$(cat "$tol/Серия Война и мир/secret.fb2")" == "nested" ]]; then
         report "full_run_series_copied" ok
     else
         report "full_run_series_copied" fail "series book missing or wrong content"
+    fi
+
+    if [[ -z "$(find "$base/skeleton" -name 'desktop.ini')" ]]; then
+        report "full_run_desktop_ini_skipped" ok
+    else
+        report "full_run_desktop_ini_skipped" fail "desktop.ini was copied into the skeleton"
     fi
 
     if [[ -f "$base/source/Author/Толстой Лев Николаевич/Война и мир.fb2" \
@@ -268,6 +282,47 @@ run_full_run_tests() {
 }
 
 ###############################################################################
+# skip: Windows metadata never lands in the library
+###############################################################################
+run_skip_tests() {
+    echo "== skip list =="
+    local base="$TMPDIR/skip" out="$TMPDIR/skip_out.txt" err="$TMPDIR/skip_err.txt"
+    local reports="$TMPDIR/skip_reports"
+    local skeleton="$base/skeleton" source="$base/source/Author"
+
+    mkdir -p "$skeleton/Т/То/Толс"
+    mkdir -p "$source/Толстой Лев Николаевич/Серия"
+    printf 'fb2\n' > "$source/Толстой Лев Николаевич/real.fb2"
+    printf 'meta\n' > "$source/Толстой Лев Николаевич/desktop.ini"
+    printf 'meta\n' > "$source/Толстой Лев Николаевич/Thumbs.db"
+    printf 'meta\n' > "$source/Толстой Лев Николаевич/Серия/desktop.ini"
+    printf 'meta\n' > "$source/Толстой Лев Николаевич/Серия/Thumbs.db"
+
+    run_merge "$out" "$err" -- \
+        --config "$EMPTY_CONFIG" \
+        --source "$source" --skeleton "$skeleton" --report-dir "$reports"
+
+    local tol="$skeleton/Т/То/Толс/Толстой Лев Николаевич"
+    if [[ -f "$tol/real.fb2" ]] \
+       && [[ ! -e "$tol/desktop.ini" ]] \
+       && [[ ! -e "$tol/Thumbs.db" ]] \
+       && [[ ! -e "$tol/Серия/desktop.ini" ]] \
+       && [[ ! -e "$tol/Серия/Thumbs.db" ]]; then
+        report "skip_metadata_not_copied" ok
+    else
+        report "skip_metadata_not_copied" fail "a skipped metadata file reached the skeleton"
+    fi
+
+    local sk
+    sk="$(count_status "$reports/merge-manifest.tsv" "skipped")"
+    if (( sk == 4 )) && grep -q "Windows metadata" "$reports/skipped-files.tsv"; then
+        report "skip_metadata_recorded" ok
+    else
+        report "skip_metadata_recorded" fail "skipped rows=$sk (expect 4), reason not in skipped-files"
+    fi
+}
+
+###############################################################################
 # duplicate: pre-existing destination file is never overwritten (never)
 ###############################################################################
 run_duplicate_tests() {
@@ -282,7 +337,7 @@ run_duplicate_tests() {
         --skeleton "$base/skeleton" \
         --report-dir "$reports"
 
-    if [[ "$(cat "$base/skeleton/Т/То/Толс/Война и мир.fb2")" == "OLD" ]]; then
+    if [[ "$(cat "$base/skeleton/Т/То/Толс/Толстой Лев Николаевич/Война и мир.fb2")" == "OLD" ]]; then
         report "duplicate_not_overwritten" ok
     else
         report "duplicate_not_overwritten" fail "pre-existing destination file was overwritten"
@@ -298,7 +353,7 @@ run_duplicate_tests() {
 }
 
 ###############################################################################
-# collision: two authors -> same prefix dir, same book name
+# collision: two source folders -> same author folder -> same book name
 ###############################################################################
 run_collision_tests() {
     echo "== collision =="
@@ -307,9 +362,12 @@ run_collision_tests() {
     local skeleton="$base/skeleton" source="$base/source/Author"
 
     mkdir -p "$skeleton/М/Май"
-    mkdir -p "$source/Майоров Иван" "$source/Майорова Ольга"
-    printf 'one\n' > "$source/Майоров Иван/same.fb2"
-    printf 'two\n' > "$source/Майорова Ольга/same.fb2"
+    # A leading-space folder name trims to the same author ("Майоров Иван")
+    # as the plain one, so both resolve to М/Май/Майоров Иван.  Space (0x20)
+    # sorts before Cyrillic М (0xD0), so the leading-space folder is first.
+    mkdir -p "$source/ Майоров Иван" "$source/Майоров Иван"
+    printf 'one\n' > "$source/ Майоров Иван/same.fb2"
+    printf 'two\n' > "$source/Майоров Иван/same.fb2"
 
     run_merge "$out" "$err" -- \
         --config "$EMPTY_CONFIG" \
@@ -317,8 +375,7 @@ run_collision_tests() {
         --skeleton "$skeleton" \
         --report-dir "$reports"
 
-    # Byte order: "И" (0x98) sorts before "О" (0x9E), so Майоров Иван wins.
-    if [[ "$(cat "$skeleton/М/Май/same.fb2")" == "one" ]]; then
+    if [[ "$(cat "$skeleton/М/Май/Майоров Иван/same.fb2")" == "one" ]]; then
         report "collision_first_copy_wins" ok
     else
         report "collision_first_copy_wins" fail "first source did not win"
@@ -326,7 +383,7 @@ run_collision_tests() {
 
     local coll
     coll="$(count_status "$reports/merge-manifest.tsv" "collision")"
-    if (( coll == 1 )) && grep -q "Майорова Ольга" "$reports/collisions.tsv"; then
+    if (( coll == 1 )) && grep -q "Майоров Иван" "$reports/collisions.tsv"; then
         report "collision_recorded" ok
     else
         report "collision_recorded" fail "collision rows=$coll, author missing from collisions.tsv"
@@ -342,6 +399,7 @@ run_rerun_tests() {
     local reports="$TMPDIR/rerun_reports"
     build_basic_fixtures "$base"
 
+    local tol="$base/skeleton/Т/То/Толс/Толстой Лев Николаевич"
     run_merge "$out" "$err" -- \
         --config "$EMPTY_CONFIG" \
         --source "$base/source/Author" \
@@ -362,7 +420,7 @@ run_rerun_tests() {
         report "rerun_all_duplicate_name" fail "duplicate-name rows=$dn (expect 6)"
     fi
 
-    if [[ "$(cat "$base/skeleton/Т/То/Толс/Война и мир.fb2")" == "fb2" ]]; then
+    if [[ "$(cat "$tol/Война и мир.fb2")" == "fb2" ]]; then
         report "rerun_contents_unchanged" ok
     else
         report "rerun_contents_unchanged" fail "file content changed on re-run"
@@ -385,7 +443,7 @@ run_no_recursive_tests() {
         --report-dir "$reports" \
         --no-recursive
 
-    if [[ ! -e "$base/skeleton/Т/То/Толс/Серия Война и мир/secret.fb2" ]]; then
+    if [[ ! -e "$base/skeleton/Т/То/Толс/Толстой Лев Николаевич/Серия Война и мир/secret.fb2" ]]; then
         report "no_recursive_series_not_copied" ok
     else
         report "no_recursive_series_not_copied" fail "series book was copied despite --no-recursive"
@@ -393,7 +451,8 @@ run_no_recursive_tests() {
 
     local sk
     sk="$(count_status "$reports/merge-manifest.tsv" "skipped")"
-    if (( sk == 1 )) && grep -q "Серия Война и мир" "$reports/skipped-files.tsv"; then
+    # The series folder plus the author-root desktop.ini are skipped.
+    if (( sk == 2 )) && grep -q "Серия Война и мир" "$reports/skipped-files.tsv"; then
         report "no_recursive_series_skipped" ok
     else
         report "no_recursive_series_skipped" fail "series folder not recorded as skipped (rows=$sk)"
@@ -418,7 +477,7 @@ run_overwrite_tests() {
         --report-dir "$reports" \
         --overwrite force
 
-    if [[ "$(cat "$base/skeleton/Т/То/Толс/Война и мир.fb2")" == "fb2" ]]; then
+    if [[ "$(cat "$base/skeleton/Т/То/Толс/Толстой Лев Николаевич/Война и мир.fb2")" == "fb2" ]]; then
         report "overwrite_force_replaces" ok
     else
         report "overwrite_force_replaces" fail "existing file was not replaced"
@@ -444,7 +503,7 @@ run_overwrite_tests() {
         --report-dir "$reports2" \
         --overwrite ask
 
-    if [[ "$(cat "$base2/skeleton/Т/То/Толс/Война и мир.fb2")" == "OLD" ]]; then
+    if [[ "$(cat "$base2/skeleton/Т/То/Толс/Толстой Лев Николаевич/Война и мир.fb2")" == "OLD" ]]; then
         report "overwrite_ask_noninteractive_skips" ok
     else
         report "overwrite_ask_noninteractive_skips" fail "non-interactive ask overwrote a file"
@@ -486,8 +545,8 @@ EOF
     # No path flags: everything comes from the config file.
     run_merge "$out" "$err" -- --config "$cfg"
     if (( LAST_RC == 0 )) \
-       && [[ -f "$cfg_skeleton/Т/То/Толс/Война и мир.fb2" ]] \
-       && [[ ! -e "$cfg_skeleton/Т/То/Толс/Серия/том1.fb2" ]] \
+       && [[ -f "$cfg_skeleton/Т/То/Толс/Толстой Лев Николаевич/Война и мир.fb2" ]] \
+       && [[ ! -e "$cfg_skeleton/Т/То/Толс/Толстой Лев Николаевич/Серия/том1.fb2" ]] \
        && [[ -f "$cfg_reports/merge-manifest.tsv" ]]; then
         report "config_paths_and_behavior" ok
     else
@@ -505,8 +564,8 @@ EOF
         --config "$cfg" \
         --source "$src2" --skeleton "$sk2" --report-dir "$rep2" --recursive
     if (( LAST_RC == 0 )) \
-       && [[ -f "$sk2/Т/То/Толс/Серия/том1.fb2" ]] \
-       && [[ ! -f "$cfg_skeleton/Т/То/Толс/Серия/том1.fb2" ]]; then
+       && [[ -f "$sk2/Т/То/Толс/Толстой Лев Николаевич/Серия/том1.fb2" ]] \
+       && [[ ! -f "$cfg_skeleton/Т/То/Толс/Толстой Лев Николаевич/Серия/том1.fb2" ]]; then
         report "config_flags_override" ok
     else
         report "config_flags_override" fail "command-line flags did not override the config file"
@@ -523,7 +582,7 @@ EOF
         > "$out" 2> "$err"
     rc_env=$?
     set -e
-    if (( rc_env == 0 )) && [[ -f "$sk2/Т/То/Толс/env.fb2" ]]; then
+    if (( rc_env == 0 )) && [[ -f "$sk2/Т/То/Толс/Толстой Лев Николаевич/env.fb2" ]]; then
         report "config_env_overrides" ok
     else
         report "config_env_overrides" fail "environment variable did not override the config file"
@@ -656,12 +715,13 @@ run_release_tests() {
 # dispatch
 ###############################################################################
 case "${1:-all}" in
-    all)      run_dry_run_tests; run_full_run_tests; run_duplicate_tests
-              run_collision_tests; run_rerun_tests; run_no_recursive_tests
-              run_overwrite_tests; run_config_tests; run_ambiguous_tests
-              run_cli_tests; run_release_tests ;;
+    all)      run_dry_run_tests; run_full_run_tests; run_skip_tests
+              run_duplicate_tests; run_collision_tests; run_rerun_tests
+              run_no_recursive_tests; run_overwrite_tests; run_config_tests
+              run_ambiguous_tests; run_cli_tests; run_release_tests ;;
     dry)      run_dry_run_tests ;;
     full)     run_full_run_tests ;;
+    skip)     run_skip_tests ;;
     duplicate) run_duplicate_tests ;;
     collision) run_collision_tests ;;
     rerun)    run_rerun_tests ;;
@@ -673,9 +733,10 @@ case "${1:-all}" in
     release)  run_release_tests ;;
     --list)
         echo "dry:        resolve + report only, nothing copied"
-        echo "full:       mixed formats + series copied to the right prefix dirs"
+        echo "full:       mixed formats + series copied under the author folder"
+        echo "skip:       desktop.ini / Thumbs.db are never copied"
         echo "duplicate:  pre-existing destination never overwritten"
-        echo "collision:  same destination name from two sources this run"
+        echo "collision:  same author folder + name from two sources"
         echo "rerun:      repeated merge is idempotent"
         echo "no-recursive: direct files only, series subfolders skipped"
         echo "overwrite:  force replaces, ask (non-interactive) behaves like never"

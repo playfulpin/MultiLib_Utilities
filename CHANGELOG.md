@@ -7,6 +7,20 @@ All notable changes to the author-toolchain scripts in this repository:
 
 ## [Unreleased] - 2026-08-30
 
+- **Merge tool v0.1.2.**  Destination layout fixed to give each author its
+  own folder under the deepest matching prefix, and Windows metadata is
+  never copied:
+  - **Author folder under the prefix.**  `Абби Линн/Magic The Gathering/…`
+    now lands at `А/Аб/Абби Линн/…` instead of directly under `А/Аб/…`,
+    so authors that share a prefix never mix their books.  When the matched
+    skeleton path already is the author's own folder (from a prior run) the
+    author is not appended twice.
+  - **Skip list.**  `desktop.ini` and `Thumbs.db` (case-insensitive, any
+    depth) are never copied and are reported as `skipped` with reason
+    `Windows metadata file (skip list)`.  The list is configurable via
+    `MERGE_SKIP_NAMES` (config or environment).
+  - Config file documents the new key; suite grown to 45/45 checks.
+
 - **Merge tool v0.1.1.**  `bin/merge_books_into_skeleton.sh` plus
   `lib/merge_books_functions.sh` copy every top-level author folder of a
   legacy archive into the deepest matching prefix directory of a pre-built

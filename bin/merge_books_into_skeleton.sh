@@ -3,17 +3,19 @@
 ###############################################################################
 # bin/merge_books_into_skeleton.sh
 #
-# Version:       0.1.1
-# Last updated:  2026-08-30 20:25
+# Version:       0.1.2
+# Last updated:  2026-08-30 21:00
 #
 # -----------------------------------------------------------------------------
 # PURPOSE
 # -----------------------------------------------------------------------------
 #   Merge a legacy book archive into a pre-built author-prefix skeleton.
 #   Every top-level folder of the source archive is treated as an author;
-#   its files are copied into the deepest skeleton prefix directory that
-#   matches the beginning of the author name.  Book-series subfolders are
-#   copied recursively by default, preserving their relative layout.
+#   its files are copied into a directory named after the author, placed
+#   under the deepest skeleton prefix that matches the author name.
+#   Book-series subfolders are copied recursively by default, preserving
+#   their relative layout.  Windows metadata files (desktop.ini, Thumbs.db
+#   by default) are never copied.
 #
 #   The skeleton is the source of truth and is never modified (no new
 #   directories, no unapproved overwrites).  See

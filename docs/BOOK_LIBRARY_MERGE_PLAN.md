@@ -55,23 +55,27 @@ Always test with a temporary destination first. The source archive must not be
 modified.
 
 The skeleton builder creates only valid prefix directories. It does not create
-an additional directory named after each author.
+an additional directory named after each author; the merge tool adds that
+folder below the matched prefix.
 
 ## Phase 2: resolve an archive author
 
 The merge tool will use the direct folder names under `ToLoad/Author/` as the
 source author names. It will inspect the existing skeleton and select the
 **deepest valid prefix directory** whose path corresponds to the beginning of
-the author name.
+the author name, then place a folder named after the author below it.
 
 Example:
 
 ```text
 Source author:  Толстой Лев Николаевич
-Destination:   Т/То/Толс/
+Destination:   Т/То/Толс/Толстой Лев Николаевич/
 ```
 
-No additional author-specific directory is created below `Т/То/Толс/`.
+The skeleton itself holds only prefix directories; the author folder is a
+merge-time extension below the matched prefix, so authors sharing a prefix
+stay separate. If the matched prefix is already the author's own folder (from
+a previous run), the author is not appended twice.
 
 The skeleton is the source of truth for valid destination paths. If no matching
 path exists, the author is reported as unmatched and no files are copied. If a
@@ -90,13 +94,18 @@ The command is:
   --dry-run
 ```
 
-The implementation (v0.1.1):
+The implementation:
 
 - processes direct author folders under `Author/`;
+- gives each author its own **folder under the deepest matching prefix**, so
+  authors that share a prefix never mix their books:
+  `Абби Линн/Magic The Gathering/…` lands at
+  `А/Аб/Абби Линн/Magic The Gathering/…`;
 - copies every file of an author **recursively by default**: subfolders are
-  book series and keep their relative layout inside the destination prefix
-  directory (`Серия/том1.fb2` lands next to the author's other books);
+  book series and keep their relative layout inside the author folder;
 - `--no-recursive` copies direct files only and records subfolders as skipped;
+- **never copies Windows metadata** (`desktop.ini`, `Thumbs.db` by default,
+  configurable via `MERGE_SKIP_NAMES`);
 - empty subfolders are never created;
 - copies files rather than moving or linking them;
 - supports mixed book formats without unpacking archives;
@@ -104,7 +113,7 @@ The implementation (v0.1.1):
 - leaves the source archive unchanged;
 - copies into the deepest valid prefix directory;
 - never overwrites without permission (policy `never` by default);
-- remains safe to repeat.
+- remains safe to repeat (re-runs see author folders already in the skeleton).
 
 Multi-author expansion is deliberately out of scope for this first merge
 operation. It can be added later when the metadata and identity rules are
