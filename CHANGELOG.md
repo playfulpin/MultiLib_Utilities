@@ -5,7 +5,35 @@ All notable changes to the author-toolchain scripts in this repository:
 `bin/build_prefix_table.sh` (prefix-table generator), and
 `bin/prefix_tree_visualizer.sh` (tree renderer).
 
-## [Unreleased] - 2026-08-29
+## [Unreleased] - 2026-08-30
+
+- **First implementation of the merge tool.**  `bin/merge_books_into_skeleton.sh`
+  (v0.1.0) plus `lib/merge_books_functions.sh` now copy the direct files of
+  every top-level author folder in a legacy archive into the deepest matching
+  prefix directory of a pre-built skeleton, per `docs/BOOK_LIBRARY_MERGE_PLAN.md`:
+  - The skeleton is the source of truth: prefixes are matched byte-wise against
+    the author name (exact for UTF-8 in Cygwin and WSL bash), the longest
+    match wins, and distinct paths sharing it are reported as ambiguous.
+  - Copy-only: the source archive is never modified, existing destination
+    files are never overwritten, and re-runs are idempotent (duplicate-name).
+  - Direct files only: mixed formats (`.fb2`, `.epub`, `.zip`, `.txt`, ...) are
+    copied as-is; nested source folders are recorded as skipped.
+  - Six TSV reports are written to `--report-dir`: `merge-manifest.tsv`,
+    `unmatched-authors.tsv`, `ambiguous-authors.tsv`, `collisions.tsv`,
+    `duplicates.tsv`, and `skipped-files.tsv`.
+  - `--dry-run` resolves every author and writes the reports without touching
+    the skeleton; run it first and review before a real copy.
+  - New suite `tests/test_merge_books_into_skeleton.sh`: 31/31 checks green
+    (dry run, full run, duplicate-name, collision, re-run idempotency,
+    ambiguous, CLI, version headers).  Unlike the UTF-8-slicing suites, it
+    runs under both Cygwin/MSYS bash and WSL.
+
+- Added `docs/BOOK_LIBRARY_MERGE_PLAN.md`, documenting the approved next
+  phase: build the author-prefix skeleton, resolve archive authors to the
+  deepest valid prefix directory, and safely copy mixed-format books from
+  `C:\\Backup_Nova3\\ToLoad` without overwriting existing filenames. The first
+  implementation will use dry-run reports and will leave multi-author expansion
+  out of scope.
 
 - Reorganized the repository into a conventional Bash project layout:
   executable tools under `bin/`, reusable AWK code under `lib/`, regression

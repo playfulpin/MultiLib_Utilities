@@ -18,6 +18,9 @@ bin/build_prefix_table.sh ──> bin/prefix_table_integrity.sh ──> bin/pref
 
 bin/build_shell_nested_authors.sh
    (build a nested directory tree directly from names)
+
+bin/merge_books_into_skeleton.sh
+   (copy a legacy book archive into the skeleton, safely)
 ```
 
 The canonical prefix table format is TAB-separated with four columns:
@@ -102,6 +105,32 @@ Options: `-m/--min-authors` (default 10), `-x/--max-prefix` (default 5),
 ./bin/build_shell_nested_authors.sh -i data/fixtures/authors_list_from_db.txt -m 10 -x 5
 ```
 
+### `bin/merge_books_into_skeleton.sh`
+
+Copies the direct files of every top-level author folder in a legacy archive
+into the **deepest valid prefix directory** of a pre-built skeleton. The
+skeleton is the source of truth and is never modified; existing destination
+files are never overwritten. See `docs/BOOK_LIBRARY_MERGE_PLAN.md` for the
+full design.
+
+```bash
+./bin/merge_books_into_skeleton.sh \
+    --source /mnt/c/Backup_Nova3/ToLoad/Author \
+    --skeleton /mnt/c/Backup_Nova3/Library \
+    --report-dir /mnt/c/Backup_Nova3/merge-reports \
+    --dry-run
+```
+
+Options: `-s/--source`, `-k/--skeleton`, `-r/--report-dir` (default
+`$PWD/merge-reports`), `--dry-run` (resolve and report, copy nothing),
+`-v/--version`, `-h/--help`. Reports are written as TSV files:
+`merge-manifest.tsv`, `unmatched-authors.tsv`, `ambiguous-authors.tsv`,
+`collisions.tsv`, `duplicates.tsv`, and `skipped-files.tsv`. Always run
+`--dry-run` first and review the reports before a real copy.
+
+Unlike the UTF-8-slicing tools, this script compares prefixes byte-wise
+(exact for UTF-8), so it runs under both Cygwin/MSYS bash and WSL.
+
 ### `lib/utf8_prefix_generator.awk`
 
 The original AWK generator, kept as a parity reference against
@@ -123,6 +152,7 @@ wsl.exe bash tests/test_build_shell_nested_authors.sh
 wsl.exe bash tests/test_prefix_tree_visualizer.sh    # renderer: goldens, descent, filters, depth, CLI
 wsl.exe bash tests/test_utf8_prefix_generator.sh     # AWK generator: direct edge-case tests
 wsl.exe bash tests/test_e2e_pipeline.sh              # generator -> validator -> renderer on real data
+bash tests/test_merge_books_into_skeleton.sh         # archive -> skeleton merge (runs anywhere)
 ```
 
 Suites write nothing to the repository; each builds its scratch files in a
@@ -144,6 +174,7 @@ Releases are tagged with a tool-prefixed name:
 | `bin/prefix_table_integrity.sh` | 1.2.1 | `prefix_table_integrity-1.2.1` |
 | `bin/prefix_tree_visualizer.sh` | 2.8.1 | `v2.8.1` |
 | `bin/build_shell_nested_authors.sh` | 6.6.8 | `v6.6.8` |
+| `bin/merge_books_into_skeleton.sh` | 0.1.0 | `merge_books_into_skeleton-0.1.0` |
 | `lib/utf8_prefix_generator.awk` | 1.1 | `utf8_prefix_generator-1.1` |
 
 `v2.8.1` and `v6.6.8` predate the tool-prefixed convention.
@@ -159,10 +190,14 @@ bin/build_prefix_table.sh           prefix-table generator (working script)
 bin/prefix_table_integrity.sh       prefix-table validator
 bin/prefix_tree_visualizer.sh       prefix-tree renderer
 bin/build_shell_nested_authors.sh   nested-directory builder
+bin/merge_books_into_skeleton.sh    archive -> skeleton merge tool
+lib/merge_books_functions.sh        shared functions for the merge tool
 lib/utf8_prefix_generator.awk       original AWK generator (parity reference)
 
 tests/test_*.sh                 regression suites (one per tool + e2e)
 tests/                          fixtures and golden files
+
+docs/BOOK_LIBRARY_MERGE_PLAN.md        skeleton + merge design document
 
 data/fixtures/authors_list_from_db.txt        real author list (6,088 names)
 data/sql/CTE_table.sql / data/sql/populate_tree.sql   nested-set dictionary table (schema + data)
