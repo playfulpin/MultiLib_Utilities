@@ -1,6 +1,6 @@
 # Book library skeleton and merge plan
 
-**Status:** Implemented (v0.1.0)  
+**Status:** Implemented (pipeline: merge v0.1.2 + finalize v0.1.0)  
 **Updated:** 2026-08-30
 
 ## Goal
@@ -181,21 +181,47 @@ Run the following sequence:
 
 ## Implementation
 
-The files below were implemented in v0.1.0 (see `CHANGELOG.md`):
+The whole pipeline below is implemented (see `CHANGELOG.md`):
 
 ```text
-bin/merge_books_into_skeleton.sh
-lib/merge_books_functions.sh
-tests/test_merge_books_into_skeleton.sh
+bin/build_shell_nested_authors.sh        build the prefix skeleton (6.6.8)
+bin/merge_books_into_skeleton.sh         fill it from the archive (v0.1.2)
+lib/merge_books_functions.sh             shared functions for the merge tool
+bin/merge_skeleton_into_books.sh         finalize into the Books library (v0.1.0)
 ```
 
-The suite covers normal authors, Cyrillic names, duplicate filenames,
+The merge suite covers normal authors, Cyrillic names, duplicate filenames,
 collisions, unmatched authors, ambiguous matches, recursive series copy,
-`--no-recursive`, overwrite policies, config-file loading, mixed extensions,
-dry-run behavior, and repeated execution (42/42 checks).
+`--no-recursive`, overwrite policies, skip list (desktop.ini / Thumbs.db),
+config-file loading, mixed extensions, dry-run behavior, and repeated
+execution (45/45 checks).  The finalize suite is 21/21 checks.
 
-Statuses used in the reports: `copied`, `would-copy` (dry run),
+Statuses used in the merge reports: `copied`, `would-copy` (dry run),
 `overwritten`, `duplicate-name` (destination name already existed),
 `duplicate` (same source copied twice), `collision` (destination name written
 this run by a different source), `unmatched-author`, `ambiguous-author`, and
-`skipped` (failed copies, or subfolders under `--no-recursive`).
+`skipped` (failed copies, subfolders under `--no-recursive`, or Windows
+metadata matched by the skip list).
+
+## Finalize step: merge the populated skeleton into Books
+
+`bin/merge_skeleton_into_books.sh` (v0.1.0) finalizes the populated skeleton
+into the Books library in three safe steps:
+
+1. rename the skeleton to a timestamped staging folder `BooksInput_<ts>`;
+2. remove every empty directory inside the staging folder;
+3. copy the remaining content into `Books`, never overwriting an existing
+   folder or file (the destination wins).
+
+```bash
+./bin/merge_skeleton_into_books.sh \
+  --source /mnt/c/Backup_Nova3/Empty_Skeleton \
+  --target /mnt/c/Backup_Nova3/Books \
+  --report-dir /mnt/c/Backup_Nova3/merge-reports \
+  --dry-run
+```
+
+The staging folder is retained intact (the input is not consumed); only empty
+subdirectories are pruned.  A per-file TSV report records `copied` / `kept-
+existing` (or `would-copy` / `would-keep` in a dry run).  `--no-rename` and
+`--no-prune` are escape hatches.  `--dry-run` is always run first.

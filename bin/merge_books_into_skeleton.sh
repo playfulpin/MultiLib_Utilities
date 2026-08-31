@@ -34,8 +34,8 @@
 # USAGE
 # -----------------------------------------------------------------------------
 #   ./bin/merge_books_into_skeleton.sh \
-#       --source /mnt/c/Backup_Nova3/ToLoad/Author \
-#       --skeleton /mnt/c/Backup_Nova3/Library \
+#       --source /mnt/c/Backup_Nova3/ToLoad \
+#       --skeleton /mnt/c/Backup_Nova3/Empty_Skeleton \
 #       --report-dir /mnt/c/Backup_Nova3/merge-reports \
 #       --dry-run
 #

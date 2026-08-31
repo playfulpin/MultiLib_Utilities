@@ -22,3 +22,7 @@ prefix_children
 
 # Editor backups
 *.bak
+
+# Merge-tool generated reports (written to $PWD when --report-dir is unset)
+merge_books_*.tsv
+merge_skeleton_into_books_*.tsv
