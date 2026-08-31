@@ -2,8 +2,26 @@
 
 All notable changes to the author-toolchain scripts in this repository:
 `bin/build_shell_nested_authors.sh` (directory-tree builder),
-`bin/build_prefix_table.sh` (prefix-table generator), and
-`bin/prefix_tree_visualizer.sh` (tree renderer).
+`bin/build_prefix_table.sh` (prefix-table generator),
+`bin/prefix_tree_visualizer.sh` (tree renderer),
+`bin/merge_books_into_skeleton.sh`, and
+`bin/merge_skeleton_into_books.sh`.
+
+## [Unreleased] - 2026-08-31
+
+- **`bin/merge_skeleton_into_books.sh` v0.1.1.**  Finalize tool improvements:
+  - New flag `--from-pruned`: skip rename + prune when the source is already a
+    cleared `BooksInput_<timestamp>` folder.
+  - Auto-detection: if the source directory name starts with `BooksInput_`,
+    rename and prune are skipped automatically (same effect as `--from-pruned`).
+  - Default report directory changed to the fixed path
+    `/mnt/c/Backup_Nova3/merge-reports` so all reports are collected in one place.
+  - Clear mode messages (`mode: from-pruned …` / `mode: auto-detected …`).
+  - `RENAME` default now declared with the other configuration variables
+    (avoids unbound-variable issues under `set -u`).
+  - Suite `tests/test_merge_skeleton_into_books.sh` expanded and adjusted:
+    dry-run, full run, `--no-rename`, `--from-pruned`, auto-detection,
+    CLI, and version header.
 
 ## [Unreleased] - 2026-08-30
 
@@ -232,85 +250,6 @@ released tool follows the same pattern:
    `6.6.8` → `6.6.9` for the tree builder, `1.0.3` → `1.0.4` for the prefix
    table, `2.8.1` → `2.8.2` for the visualizer) and update the `Last updated`
    timestamp.
-3. **Validate**: run the regression suites at the repository root from WSL
-   (`wsl.exe bash tests/test_build_shell_nested_authors.sh`,
-   `wsl.exe bash tests/test_build_prefix_table.sh`,
-   `wsl.exe bash tests/test_prefix_tree_visualizer.sh`,
-   `wsl.exe bash tests/test_utf8_prefix_generator.sh`, and
-   `wsl.exe bash tests/test_e2e_pipeline.sh`) — each golden, CLI, and behavioral
-   check runs directly against the working script.
-4. **Commit and tag**: commit the changes, then tag the release
-   (`v6.6.9`, or a tag naming the tool's version).
-
-## [6.6.7] - 2026-08-11
-
-- `-c/--clean-run=ON` output now leads with `rm -rf <root>` + `mkdir -p <root>` +
-  `cd <root>` before the `mkdir -p` tree, so *running the generated script*
-  destroys and rebuilds the root (the `rm` precedes the `cd` — after wiping, the
-  shell's cwd is a deleted inode).
-- New end-to-end test executes the generated clean-run script and verifies the
-  rebuilt tree (`д/де`, `В/Ва/Ван`) with stray files gone.
-
-## [6.6.6] - 2026-08-11
-
-- `ROOT_DIRECTORY` is no longer a hardcoded constant.  Resolution order
-  (industry standard): `-r/--root-dir=PATH` flag → `ROOT_DIRECTORY` environment
-  variable → built-in default (`/mnt/c/Backup_Nova3/Empty_Skeleton`).
-- New `-c/--clean-run=ON|OFF` flag (default `OFF`): destroys and rebuilds
-  `ROOT_DIRECTORY` before generating, so the emitted commands build a pristine
-  hierarchy.
-- Safety guard: refuses to clean empty, `/`, `//`, `$HOME`, or anything under
-  `$HOME`.
-
-## [6.6.5] - 2026-08-11
-
-- Semver versioning started — the header carries `Version:` + `Last updated`
-  (with hours and minutes), incremented in `0.0.1` steps per iteration.
-- Version is printed in `-h` help, derived from the header via `SCRIPT_VERSION`
-  (single source of truth — no second edit on bump).
-- DEBUG output reformatted into aligned columns: `input file` line, per-prefix
-  rows (`prefix='…' authors=…`), and `HH:MM:SS (Ns)` elapsed time.  All
-  diagnostics go to stderr only; stdout stays byte-identical.
-- Test suite asserts the version header follows the `6.6.x` pattern.
-
-## Earlier history (pre-semver, accumulated during development)
-
-- CLI: positional (`input min max`) *and* named options (`-i/-m/-x`, with `=`
-  attached, isolated, or spaced forms; `--` ends option parsing; unknown flags
-  fail loudly).  Defaults `-m 10 -x 5`.
-- `-d/--debugger=ON|OFF` (stderr diagnostics, case-insensitive values) and
-  `-f/--format=SHELL|SQL` (SQL renders the tree as `dictionary_nested_set`
-  rows with `word`/`lft`/`rgt` nested-set numbering).
-- Deterministic `LC_ALL=C` byte-order sort — locale collation interleaves case
-  variants (`В`/`в`), which produced duplicate `mkdir` lines and silently
-  dropped valid prefixes like `Ван`.
-- Space-terminated prefixes (`де `) are word boundaries, never directory
-  levels — `д/де`, never `д/де/де `.
-- O(N·max_depth) range-based tree walk over the sorted author list (the earlier
-  version rescanning the whole list per node scaled superlinearly).
-- Regression suite with stored golden files: word boundaries, case variants,
-  duplicates, CRLF + blank lines, edge cases, SQL goldens, debug mode, CLI
-  forms, root resolution, and clean-run behavior.
-
----
-
-## Usage
-
+3. **Run the relevant test suite(s)** under WSL.
+4. **Commit** with a clear message and **tag** with the tool-prefixed name.
 ```
-./bin/build_shell_nested_authors.sh --input-file=FILE [OPTIONS]
-```
-
-| Option | Description | Default |
-|---|---|---|
-| `-i, --input-file=FILE` | Author names, one per line (required) | — |
-| `-m, --min-authors=NUM` | Minimum authors for a prefix to become a directory | 10 |
-| `-x, --max-prefix=NUM` | Maximum prefix (tree depth) length | 5 |
-| `-d, --debugger=ON\|OFF` | Stderr diagnostics | OFF |
-| `-f, --format=TYPE` | Output format: `SHELL` or `SQL` | SHELL |
-| `-r, --root-dir=PATH` | Root directory for the hierarchy | `ROOT_DIRECTORY` env var, else built-in |
-| `-c, --clean-run=ON\|OFF` | Destroy and rebuild the root before/during generation | OFF |
-| `-h, --help` | Show help (exits 1) | — |
-
-The script emits `cd …` + `mkdir -p …` commands (or SQL statements); run the
-output through `bash` to build the tree.  Requires a multibyte-capable bash
-(e.g. WSL) to slice UTF-8 prefixes correctly.

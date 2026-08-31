@@ -6,6 +6,8 @@
 # Archived/scratch directories
 _Old_Stuff/
 _Save_Stuff/
+commit_msg/
+reports/
 
 # Temporary outputs and captures
 tmp_*

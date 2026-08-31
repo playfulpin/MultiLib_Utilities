@@ -3,8 +3,8 @@
 ###############################################################################
 # bin/merge_skeleton_into_books.sh
 #
-# Version:       0.1.0
-# Last updated:  2026-08-30 21:46
+# Version:       0.1.1
+# Last updated:  2026-08-31
 #
 # -----------------------------------------------------------------------------
 # PURPOSE
@@ -22,13 +22,37 @@
 #   reuse it.  This is the finalize step that comes after building the
 #   skeleton and merging the archive books into it.
 #
+#   Starting after the prune step
+#   -----------------------------
+#   Two convenient ways to begin at step 3 (the merge/copy):
+#
+#     • --from-pruned
+#         Explicitly skip rename + prune.  Recommended when the source is
+#         already a pruned BooksInput_<timestamp> folder.
+#
+#     • Auto-detection
+#         If the basename of --source already matches BooksInput_*, rename
+#         and prune are skipped automatically.
+#
 # -----------------------------------------------------------------------------
 # EXAMPLES
 # -----------------------------------------------------------------------------
+#   # Normal full run
 #   ./bin/merge_skeleton_into_books.sh \
 #       --source /mnt/c/Backup_Nova3/Empty_Skeleton \
-#       --target /mnt/c/Backup_Nova3/Books \
+#       --target /mnt/o/Books \
 #       --dry-run
+#
+#   # Start after prune (explicit)
+#   ./bin/merge_skeleton_into_books.sh \
+#       --source /mnt/c/Backup_Nova3/BooksInput_20260831-143000 \
+#       --target /mnt/o/Books \
+#       --from-pruned
+#
+#   # Start after prune (auto-detected because name starts with BooksInput_)
+#   ./bin/merge_skeleton_into_books.sh \
+#       --source /mnt/c/Backup_Nova3/BooksInput_20260831-143000 \
+#       --target /mnt/o/Books
 #
 #   Always run --dry-run first and review the report, then drop --dry-run
 #   to actually rename, prune, and copy.
@@ -36,9 +60,11 @@
 # -----------------------------------------------------------------------------
 # REPORT
 # -----------------------------------------------------------------------------
-#   A TSV report is written to the current directory,
-#   merge_skeleton_into_books_<timestamp>.tsv: one row per file with status
-#   `copied` or `kept-existing` (in a dry run `would-copy` / `would-keep`).
+#   A TSV report is written to:
+#     /mnt/c/Backup_Nova3/merge-reports/merge_skeleton_into_books_<timestamp>.tsv
+#
+#   One row per file with status `copied` or `kept-existing`
+#   (in a dry run `would-copy` / `would-keep`).
 #   Nothing in the library or the staging folder is modified by a dry run.
 #
 ###############################################################################
@@ -49,18 +75,17 @@ set -euo pipefail
 SOURCE_DIR="/mnt/c/Backup_Nova3/Empty_Skeleton"
 TARGET_DIR="/mnt/c/Backup_Nova3/Books"
 DRY_RUN=false
+RENAME=true
 PRUNE_EMPTY=true
 TIMESTAMP="$(date '+%Y%m%d-%H%M%S')"
-REPORT_DIR="$PWD"
+REPORT_DIR="/mnt/c/Backup_Nova3/merge-reports"
+FROM_PRUNED=false
 
 # --- globals used only by main() ---------------------------------------------
 REPORT_FILE=""
 
 # -----------------------------------------------------------------------------
 # usage
-# -----------------------------------------------------------------------------
-# Print the command-line contract to standard error and exit 1 (repo
-# convention: usage() always exits non-zero, including for -h).
 # -----------------------------------------------------------------------------
 usage() {
     local version
@@ -77,19 +102,23 @@ usage() {
     echo "      --timestamp=STAMP  Suffix for the BooksInput_<stamp> name" >&2
     echo "                         [default: YYYYMMDD-HHMMSS]" >&2
     echo "      --report-dir=DIR   Where the TSV report file is written" >&2
-    echo "                         [default: \$PWD]" >&2
+    echo "                         [default: /mnt/c/Backup_Nova3/merge-reports]" >&2
+    echo "      --from-pruned      Skip rename + prune; source is already a" >&2
+    echo "                         pruned BooksInput_<ts> folder" >&2
     echo "      --no-rename        Skip the rename to BooksInput_<stamp>" >&2
     echo "      --no-prune         Leave empty directories in place" >&2
     echo "      --dry-run          Show the steps and report, change nothing" >&2
     echo "  -v, --version          Print the version and exit 0" >&2
     echo "  -h, --help             Show this help message" >&2
+    echo "" >&2
+    echo "Notes:" >&2
+    echo "  • If the source directory name already starts with BooksInput_," >&2
+    echo "    rename and prune are skipped automatically (same effect as" >&2
+    echo "    --from-pruned)." >&2
 }
 
 # -----------------------------------------------------------------------------
 # parse_arguments
-# -----------------------------------------------------------------------------
-# Accept -s, -s DIR, --source=DIR and -t variants in combined or isolated
-# form; "--" ends option parsing.  Unknown options fail loudly.
 # -----------------------------------------------------------------------------
 parse_arguments() {
     local arg flag value
@@ -109,6 +138,9 @@ parse_arguments() {
                 ;;
             --dry-run)
                 DRY_RUN=true
+                ;;
+            --from-pruned)
+                FROM_PRUNED=true
                 ;;
             --no-rename)
                 RENAME=false
@@ -213,8 +245,6 @@ parse_arguments() {
 # -----------------------------------------------------------------------------
 # report_row
 # -----------------------------------------------------------------------------
-# Append one TSV row to the report (a no-op when no report could be opened).
-# -----------------------------------------------------------------------------
 report_row() {
     [[ -n "$REPORT_FILE" ]] || return 0
     printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$REPORT_FILE"
@@ -244,6 +274,26 @@ main() {
             ;;
     esac
 
+    # ------------------------------------------------------------------
+    # Decide whether we are starting after the prune step
+    # ------------------------------------------------------------------
+    local source_base
+    source_base="$(basename "$SOURCE_DIR")"
+
+    if [[ "$FROM_PRUNED" == true ]]; then
+        RENAME=false
+        PRUNE_EMPTY=false
+        if [[ "$source_base" != BooksInput_* ]]; then
+            echo "Warning: --from-pruned used but source name does not start with BooksInput_ ('$source_base')." >&2
+        fi
+        echo "mode: from-pruned (skip rename + prune)"
+    elif [[ "$source_base" == BooksInput_* ]]; then
+        # Auto-detect: source already looks like a staging folder
+        RENAME=false
+        PRUNE_EMPTY=false
+        echo "mode: auto-detected BooksInput_* source → skip rename + prune"
+    fi
+
     if [[ "$DRY_RUN" == true ]]; then
         echo "## DRY RUN - nothing will be changed ##"
     fi
@@ -254,7 +304,7 @@ main() {
     staging="$source_parent/BooksInput_$TIMESTAMP"
 
     if [[ "$RENAME" == false ]]; then
-        echo "step 1: skipped (--no-rename)"
+        echo "step 1: skipped (rename not required)"
         tree_source="$SOURCE_DIR"
     else
         if [[ -e "$staging" ]]; then
@@ -274,7 +324,7 @@ main() {
 
     # --- step 2: prune empty directories -------------------------------------
     if [[ "$PRUNE_EMPTY" == false ]]; then
-        echo "step 2: skip empty-directory pruning (--no-prune)."
+        echo "step 2: skip empty-directory pruning."
     else
         local empty_count label
         empty_count="$(find "$tree_source" -type d -empty | wc -l)"
@@ -334,13 +384,13 @@ main() {
     if [[ "$DRY_RUN" == true ]]; then
         echo "nothing was changed (dry run)."
     else
-        echo "staging folder retained at: $staging"
+        if [[ "$RENAME" == true ]]; then
+            echo "staging folder retained at: $staging"
+        else
+            echo "source folder retained at: $tree_source"
+        fi
     fi
     [[ -n "$REPORT_FILE" ]] && echo "report: $REPORT_FILE"
 }
-
-# Defaults that parse_arguments and main read; declared after use is fine in
-# bash (they are set before main runs).
-RENAME=true
 
 main "$@"

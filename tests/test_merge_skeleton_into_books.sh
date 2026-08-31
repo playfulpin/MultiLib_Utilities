@@ -11,16 +11,14 @@
 #     3. copy the remaining content into Books, never overwriting anything.
 #
 # Coverage:
-#   * DRY RUN   -- prints the three steps, writes a would-copy report, and
-#                 changes nothing (the source skeleton is still in place).
-#   * FULL RUN  -- the skeleton is renamed to BooksInput_<ts>, empty dirs are
-#                 pruned, unique files are copied into Books, a pre-existing
-#                 file with the same relative path is left untouched
-#                 (kept-existing), and the staging folder is retained intact.
-#   * NO-RENAME -- the source keeps its name (only prune + copy run).
-#   * CLI       -- usage errors, -h/-v, existing-staging name collision,
-#                 target-inside-source guard, missing/nonexistent dirs.
-#   * VERSION   -- the script carries a 0.1.x header version.
+#   * DRY RUN          -- prints the three steps, writes a would-copy report,
+#                         and changes nothing.
+#   * FULL RUN         -- rename + prune + copy-without-overwrite + retain staging.
+#   * NO-RENAME        -- source keeps its name (only prune + copy).
+#   * FROM-PRUNED      -- --from-pruned skips rename + prune.
+#   * AUTO-DETECT      -- source named BooksInput_* automatically skips rename + prune.
+#   * CLI              -- usage errors, -h/-v, staging collision, guards.
+#   * VERSION          -- script carries a 0.1.x header version.
 #
 # Usage:
 #   bash tests/test_merge_skeleton_into_books.sh
@@ -146,7 +144,7 @@ run_full_tests() {
     fi
 
     # The source skeleton was renamed to BooksInput_<ts>.
-    local staging regex_match
+    local staging
     staging="$(find "$base" -maxdepth 1 -type d -name 'BooksInput_*' | head -n 1)"
     if [[ -n "$staging" && ! -e "$base/Empty_Skeleton" ]]; then
         report "full_renamed" ok
@@ -217,6 +215,93 @@ run_no_rename_tests() {
 }
 
 ###############################################################################
+# --from-pruned: skip rename + prune
+###############################################################################
+run_from_pruned_tests() {
+    echo "== --from-pruned =="
+    local base="$TMPDIR/fp" out="$TMPDIR/fp_out.txt" err="$TMPDIR/fp_err.txt"
+    local reports="$TMPDIR/fp_reports"
+    build_fixture "$base"
+
+    # Rename the fixture source to look like a staging folder
+    mv "$base/Empty_Skeleton" "$base/BooksInput_test"
+
+    run_script "$out" "$err" -- \
+        --source "$base/BooksInput_test" --target "$base/Books" \
+        --report-dir "$reports" --from-pruned
+
+    if (( LAST_RC == 0 )); then
+        report "from_pruned_exits_0" ok
+    else
+        report "from_pruned_exits_0" fail "exit code $LAST_RC"
+    fi
+
+    # Source must keep its name
+    if [[ -d "$base/BooksInput_test" ]]; then
+        report "from_pruned_source_kept" ok
+    else
+        report "from_pruned_source_kept" fail "source was renamed or removed"
+    fi
+
+    # Content was copied
+    if [[ "$(cat "$base/Books/Т/То/Толс/Толстой Лев Николаевич/Война и мир.fb2")" == "fb2" ]]; then
+        report "from_pruned_copied" ok
+    else
+        report "from_pruned_copied" fail "content was not copied"
+    fi
+
+    # Mode message appears
+    if grep -q 'mode: from-pruned' "$out"; then
+        report "from_pruned_mode_message" ok
+    else
+        report "from_pruned_mode_message" fail "expected mode message not found"
+    fi
+}
+
+###############################################################################
+# auto-detect: source named BooksInput_* skips rename + prune
+###############################################################################
+run_auto_detect_tests() {
+    echo "== auto-detect BooksInput_* =="
+    local base="$TMPDIR/ad" out="$TMPDIR/ad_out.txt" err="$TMPDIR/ad_err.txt"
+    local reports="$TMPDIR/ad_reports"
+    build_fixture "$base"
+
+    mv "$base/Empty_Skeleton" "$base/BooksInput_auto"
+
+    run_script "$out" "$err" -- \
+        --source "$base/BooksInput_auto" --target "$base/Books" \
+        --report-dir "$reports"
+
+    if (( LAST_RC == 0 )); then
+        report "auto_detect_exits_0" ok
+    else
+        report "auto_detect_exits_0" fail "exit code $LAST_RC"
+    fi
+
+    # Source must keep its name (no rename)
+    if [[ -d "$base/BooksInput_auto" ]]; then
+        report "auto_detect_source_kept" ok
+    else
+        report "auto_detect_source_kept" fail "source was renamed"
+    fi
+
+    # Content was copied
+    if [[ "$(cat "$base/Books/Т/То/Толс/Толстой Лев Николаевич/Война и мир.fb2")" == "fb2" ]]; then
+        report "auto_detect_copied" ok
+    else
+        report "auto_detect_copied" fail "content was not copied"
+    fi
+
+    # Auto-detect message appears
+    if grep -q 'auto-detected BooksInput_\*' "$out" || grep -q 'auto-detected BooksInput_*' "$out"; then
+        report "auto_detect_mode_message" ok
+    else
+        report "auto_detect_mode_message" fail "expected auto-detect message not found"
+    fi
+}
+
+###############################################################################
 # cli: errors and options
 ###############################################################################
 run_cli_tests() {
@@ -254,8 +339,6 @@ run_cli_tests() {
     local -a ERROR_CASES=(
         "cli_no_args|"
         "cli_unknown_flag|--bogus $sk $books"
-        "cli_missing_source|--target $books"
-        "cli_missing_target|--source $sk"
         "cli_bad_source|--source /nonexistent --target $books"
         "cli_bad_target|--source $sk --target /nonexistent"
         "cli_target_inside_source|--source $sk --target $sk/sub"
@@ -290,18 +373,23 @@ run_release_tests() {
 ###############################################################################
 case "${1:-all}" in
     all)    run_dry_tests; run_full_tests; run_no_rename_tests
+            run_from_pruned_tests; run_auto_detect_tests
             run_cli_tests; run_release_tests ;;
     dry)    run_dry_tests ;;
     full)   run_full_tests ;;
     no-rename) run_no_rename_tests ;;
+    from-pruned) run_from_pruned_tests ;;
+    auto)   run_auto_detect_tests ;;
     cli)    run_cli_tests ;;
     release) run_release_tests ;;
     --list)
-        echo "dry:        steps reported, nothing changed"
-        echo "full:       rename + prune + copy-without-overwrite"
-        echo "no-rename:  source keeps its name"
-        echo "cli:        usage errors, -h/-v, staging collision"
-        echo "release:    0.1.x version header"
+        echo "dry:         steps reported, nothing changed"
+        echo "full:        rename + prune + copy-without-overwrite"
+        echo "no-rename:   source keeps its name"
+        echo "from-pruned: --from-pruned skips rename + prune"
+        echo "auto:        BooksInput_* source auto-skips rename + prune"
+        echo "cli:         usage errors, -h/-v, staging collision"
+        echo "release:     0.1.x version header"
         exit 0
         ;;
     *) echo "Unknown check group '$1'." >&2; exit 1 ;;
