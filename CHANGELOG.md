@@ -7,6 +7,16 @@ All notable changes to the author-toolchain scripts in this repository:
 
 ## [Unreleased] - 2026-08-30
 
+- **New finalize tool `bin/merge_skeleton_into_books.sh` (v0.1.0).**  Turns a
+  populated author-prefix skeleton into the Books library in three safe steps:
+  rename the skeleton to a timestamped staging folder `BooksInput_<ts>`,
+  remove every empty directory inside it, then copy the remaining content into
+  `Books` without ever overwriting an existing folder or file (the
+  destination wins).  The staging folder is retained intact; only empty
+  subdirectories are pruned.  `--dry-run` reports the three steps without
+  changing anything.  Suite `tests/test_merge_skeleton_into_books.sh`:
+  21/21 checks green (dry run, full run, no-rename, CLI, version).
+
 - **Merge tool v0.1.2.**  Destination layout fixed to give each author its
   own folder under the deepest matching prefix, and Windows metadata is
   never copied:

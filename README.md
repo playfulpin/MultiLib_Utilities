@@ -21,6 +21,9 @@ bin/build_shell_nested_authors.sh
 
 bin/merge_books_into_skeleton.sh
    (copy a legacy book archive into the skeleton, safely)
+
+bin/merge_skeleton_into_books.sh
+   (rename, prune empties, and finalize the skeleton into the Books library)
 ```
 
 The canonical prefix table format is TAB-separated with four columns:
@@ -150,6 +153,28 @@ review the reports before a real copy.
 Unlike the UTF-8-slicing tools, this script compares prefixes byte-wise
 (exact for UTF-8), so it runs under both Cygwin/MSYS bash and WSL.
 
+### `bin/merge_skeleton_into_books.sh`
+
+The finalize step: after the merge tool has populated the skeleton, turn it
+into the Books library in three safe steps:
+
+1. rename the skeleton to a timestamped staging folder `BooksInput_<ts>`;
+2. remove every empty directory inside it;
+3. copy the remaining content into `Books`, **never overwriting** an existing
+   folder or file (the destination wins).
+
+```bash
+./bin/merge_skeleton_into_books.sh \
+    --source /mnt/c/Backup_Nova3/Empty_Skeleton \
+    --target /mnt/c/Backup_Nova3/Books \
+    --dry-run
+```
+
+Options: `-s/--source`, `-t/--target`, `--timestamp=STAMP`, `--report-dir=DIR`,
+`--no-rename`, `--no-prune`, `--dry-run`, `-v/--version`, `-h/--help`. The
+staging folder is retained intact (nothing is consumed); only empty
+subdirectories are removed. A TSV report is written per run.
+
 ### `lib/utf8_prefix_generator.awk`
 
 The original AWK generator, kept as a parity reference against
@@ -172,6 +197,7 @@ wsl.exe bash tests/test_prefix_tree_visualizer.sh    # renderer: goldens, descen
 wsl.exe bash tests/test_utf8_prefix_generator.sh     # AWK generator: direct edge-case tests
 wsl.exe bash tests/test_e2e_pipeline.sh              # generator -> validator -> renderer on real data
 bash tests/test_merge_books_into_skeleton.sh         # archive -> skeleton merge (runs anywhere)
+bash tests/test_merge_skeleton_into_books.sh        # skeleton -> Books finalize (runs anywhere)
 ```
 
 Suites write nothing to the repository; each builds its scratch files in a
@@ -193,7 +219,8 @@ Releases are tagged with a tool-prefixed name:
 | `bin/prefix_table_integrity.sh` | 1.2.1 | `prefix_table_integrity-1.2.1` |
 | `bin/prefix_tree_visualizer.sh` | 2.8.1 | `v2.8.1` |
 | `bin/build_shell_nested_authors.sh` | 6.6.8 | `v6.6.8` |
-| `bin/merge_books_into_skeleton.sh` | 0.1.1 | `merge_books_into_skeleton-0.1.1` |
+| `bin/merge_books_into_skeleton.sh` | 0.1.2 | `merge_books_into_skeleton-0.1.2` |
+| `bin/merge_skeleton_into_books.sh` | 0.1.0 | `merge_skeleton_into_books-0.1.0` |
 | `lib/utf8_prefix_generator.awk` | 1.1 | `utf8_prefix_generator-1.1` |
 
 `v2.8.1` and `v6.6.8` predate the tool-prefixed convention.
@@ -210,6 +237,7 @@ bin/prefix_table_integrity.sh       prefix-table validator
 bin/prefix_tree_visualizer.sh       prefix-tree renderer
 bin/build_shell_nested_authors.sh   nested-directory builder
 bin/merge_books_into_skeleton.sh    archive -> skeleton merge tool
+bin/merge_skeleton_into_books.sh    skeleton -> Books finalize tool
 lib/merge_books_functions.sh        shared functions for the merge tool
 lib/utf8_prefix_generator.awk       original AWK generator (parity reference)
 config/merge_books.conf             defaults for the merge tool (paths + behavior)
