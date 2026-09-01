@@ -3,8 +3,8 @@
 ###############################################################################
 # bin/build_shell_nested_authors.sh
 #
-# Version:       6.6.9
-# Last updated:  2026-08-31 20:24
+# Version:       6.6.10
+# Last updated:  2026-09-01 14:06
 #
 # -----------------------------------------------------------------------------
 # PURPOSE
@@ -49,6 +49,13 @@
 #
 #   With -f sql the same tree is emitted as SQL statements for the
 #   dictionary_nested_set table (word, lft, rgt) instead.
+#
+#   APOSTROPHES: author names may legitimately contain an apostrophe
+#   (e.g. "О'Брайен"), and a prefix ending in one would otherwise become a
+#   directory component with an embedded quote ("О/О'").  The SHELL output
+#   substitutes a caret for every apostrophe ("О/О^") so emitted paths stay
+#   clean and safe to copy-paste.  The SQL output keeps the raw prefix (its
+#   rows escape single quotes for the SQL literal).
 #
 # -----------------------------------------------------------------------------
 # ALGORITHM
@@ -491,7 +498,11 @@ process_prefix() {
     # The prefix cannot be extended further, so it is the deepest possible
     # valid directory of this branch.  Print it and stop.
     if (( prefix_length >= MAX_PREFIX_LENGTH )); then
-        echo "mkdir -p $(build_directory_path "$current_prefix")"
+        # A prefix may contain an apostrophe (e.g. "О'Брайен"), which is a
+        # legal name byte but an awkward directory component.  Substitute it
+        # with a caret so the emitted path stays shell- and filesystem-safe
+        # ("mkdir -p О/О'" becomes "mkdir -p О/О^").
+        echo "mkdir -p $(build_directory_path "${current_prefix//\'/^}")"
         return
     fi
 
@@ -549,9 +560,10 @@ process_prefix() {
     # --- Leaf of the branch -------------------------------------------------
     # No valid child means the current prefix is the deepest valid directory
     # here.  "mkdir -p" will create every parent above it automatically, so
-    # this single command is sufficient.
+    # this single command is sufficient.  Apostrophes are substituted with a
+    # caret exactly as in the max-depth emission above.
     if [[ "$has_valid_child" == false ]]; then
-        echo "mkdir -p $(build_directory_path "$current_prefix")"
+        echo "mkdir -p $(build_directory_path "${current_prefix//\'/^}")"
     fi
 }
 

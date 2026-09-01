@@ -96,6 +96,11 @@ the author names. A level is only created when its prefix is shared by at least
 `MINIMUM_AUTHORS` authors, and only the deepest valid directory of each branch
 is printed.
 
+Author names may contain apostrophes (e.g. `О'Брайен`); the SHELL output
+replaces each apostrophe with a caret (`О/О^`) so generated paths stay clean
+and safe to copy-paste. The SQL output keeps the raw prefix (its rows escape
+single quotes for the SQL literal).
+
 ```bash
 ./bin/build_shell_nested_authors.sh <input_file> <minimum_authors> <max_prefix_length>
 ./bin/build_shell_nested_authors.sh -i INPUT_FILE [-m NUM] [-x NUM] [-d ON|OFF] [-f SHELL|SQL] [-r PATH] [-c ON|OFF]
@@ -249,7 +254,7 @@ Releases are tagged with a tool-prefixed name:
 | `bin/build_prefix_table.sh` | 1.0.4 | `build_prefix_table-1.0.4` |
 | `bin/prefix_table_integrity.sh` | 1.2.1 | `prefix_table_integrity-1.2.1` |
 | `bin/prefix_tree_visualizer.sh` | 2.8.1 | `v2.8.1` |
-| `bin/build_shell_nested_authors.sh` | 6.6.9 | `v6.6.9` |
+| `bin/build_shell_nested_authors.sh` | 6.6.10 | `v6.6.10` |
 | `bin/merge_books_into_skeleton.sh` | 0.1.3 | `merge_books_into_skeleton-0.1.3` |
 | `bin/merge_skeleton_into_books.sh` | 0.1.3 | `merge_skeleton_into_books-0.1.3` |
 | `lib/utf8_prefix_generator.awk` | 1.1 | `utf8_prefix_generator-1.1` |

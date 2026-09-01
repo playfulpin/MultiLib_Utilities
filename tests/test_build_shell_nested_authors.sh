@@ -23,6 +23,9 @@
 #   * CRLF line endings and a blank line -- must be normalized away.
 #   * edge cases -- single-character names, a name exactly equal to a
 #     prefix, and names with a trailing space ("де ").
+#   * apostrophes ("О'Брайен") -- a valid prefix may end in an apostrophe;
+#     the SHELL output substitutes a caret ("mkdir -p О/О^"), while the SQL
+#     output keeps the raw prefix and escapes it for the SQL literal.
 #   * parameter combos -- the spaces case is also run with max=2 to exercise
 #     the maximum-prefix-length boundary.
 #   * defaults -- running without -m/-x must behave as -m 10 -x 5.
@@ -59,7 +62,9 @@ if [[ "${1:-}" == "--regen" ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TESTS_DIR="$SCRIPT_DIR/tests"
+# The suite lives in tests/ together with its fixtures and goldens; the
+# tool under test is one level up in bin/.
+TESTS_DIR="$SCRIPT_DIR"
 GOLDEN_DIR="$TESTS_DIR/golden"
 mkdir -p "$GOLDEN_DIR"
 
@@ -77,7 +82,7 @@ declare -a SCRIPTS=(
     "bin/build_shell_nested_authors.sh"
 )
 for s in "${SCRIPTS[@]}"; do
-    [[ -f "$SCRIPT_DIR/$s" ]] || { echo "ERROR: $SCRIPT_DIR/$s not found" >&2; exit 2; }
+    [[ -f "$SCRIPT_DIR/../$s" ]] || { echo "ERROR: $SCRIPT_DIR/../$s not found" >&2; exit 2; }
 done
 
 PASS_COUNT=0
@@ -155,10 +160,11 @@ trap 'rm -rf "$tmp_root"' EXIT
 
 declare -A COPY SB
 for s in "${SCRIPTS[@]}"; do
-    base="${s%.sh}"
+    # The entry may carry a bin/ prefix; the scratch names must be bare.
+    base="$(basename "${s%.sh}")"
     SB[$s]="$tmp_root/sandbox_$base"
     mkdir -p "${SB[$s]}"
-    sed "s|/mnt/c/Backup_Go7/Empty_Skeleton|${SB[$s]}|g" "$SCRIPT_DIR/$s" > "$tmp_root/copy_$base.sh"
+    sed "s|/mnt/c/Backup_Go7/Empty_Skeleton|${SB[$s]}|g" "$SCRIPT_DIR/../$s" > "$tmp_root/copy_$base.sh"
     COPY[$s]="$tmp_root/copy_$base.sh"
 done
 
@@ -193,6 +199,7 @@ CASES=(
     "duplicates_m6_x5|$TESTS_DIR/case_duplicates.txt|6|5|$GOLDEN_DIR/duplicates_m6_x5.txt"
     "edge_m6_x5|$edge_file|6|5|$GOLDEN_DIR/edge_m6_x5.txt"
     "crlf_m6_x5|$crlf_file|6|5|$GOLDEN_DIR/crlf_m6_x5.txt"
+    "apostrophe_m6_x5|$TESTS_DIR/case_apostrophe.txt|6|5|$GOLDEN_DIR/apostrophe_m6_x5.txt"
 )
 
 for s in "${SCRIPTS[@]}"; do
@@ -260,6 +267,7 @@ echo "== bin/build_shell_nested_authors.sh: SQL format (-f sql) =="
 SQL_CASES=(
     "sql_spaces_m6_x5|$TESTS_DIR/case_spaces.txt|6|5|$GOLDEN_DIR/spaces_m6_x5_sql.txt"
     "sql_case_variants_m6_x5|$TESTS_DIR/case_case_variants.txt|6|5|$GOLDEN_DIR/case_variants_m6_x5_sql.txt"
+    "sql_apostrophe_m6_x5|$TESTS_DIR/case_apostrophe.txt|6|5|$GOLDEN_DIR/apostrophe_m6_x5_sql.txt"
 )
 for c in "${SQL_CASES[@]}"; do
     IFS='|' read -r label input min max golden <<< "$c"
@@ -421,7 +429,7 @@ fi
 # script uses to print "v<version>" in its usage text.
 echo "== version headers =="
 for s in "${SCRIPTS[@]}"; do
-    version="$(sed -n 's/^# Version:[[:space:]]*//p' "$SCRIPT_DIR/$s" | head -n 1)"
+    version="$(sed -n 's/^# Version:[[:space:]]*//p' "$SCRIPT_DIR/../$s" | head -n 1)"
     if [[ "$version" =~ ^6\.6\.[0-9]+$ ]]; then
         report "version_${s%.sh}" ok
     else

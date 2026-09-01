@@ -1,0 +1,14 @@
+DROP TABLE IF EXISTS `dictionary_nested_set`;
+CREATE TABLE `dictionary_nested_set` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `word` VARCHAR(255) NOT NULL,
+    `lft` INT NOT NULL,
+    `rgt` INT NOT NULL,
+    INDEX `idx_lft_rgt` (`lft`, `rgt`)
+) ENGINE=MYISAM COLLATE=utf8_general_ci;
+
+START TRANSACTION;
+INSERT INTO `dictionary_nested_set` (`word`, `lft`, `rgt`) VALUES
+    ('О', 1, 4),
+    ('О/О''', 2, 3);
+COMMIT;

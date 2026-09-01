@@ -9,7 +9,7 @@ Books library.
 
 ## Shipped tools
 
-- `bin/build_shell_nested_authors.sh` **6.6.9** — nested directory-tree builder (`mkdir -p` / SQL)
+- `bin/build_shell_nested_authors.sh` **6.6.10** — nested directory-tree builder (`mkdir -p` / SQL; apostrophes become `^` in SHELL output)
 - `bin/build_prefix_table.sh` **1.0.4** — pre-order trie prefix-table generator
 - `bin/prefix_table_integrity.sh` **1.2.1** — ultra-strict table validator
 - `bin/prefix_tree_visualizer.sh` **2.8.1** — Unicode tree renderer

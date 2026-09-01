@@ -7,6 +7,31 @@ All notable changes to the author-toolchain scripts in this repository:
 `bin/merge_books_into_skeleton.sh`, and
 `bin/merge_skeleton_into_books.sh`.
 
+## [Unreleased] - 2026-09-01
+
+- **`bin/build_shell_nested_authors.sh` v6.6.10 — apostrophes in directory
+  names.**  Author names may contain an apostrophe (e.g. `О'Брайен`), which
+  the prefix walker turned into a directory component ending in a quote
+  (`mkdir -p О/О'`).  The SHELL output now substitutes a caret for every
+  apostrophe (`mkdir -p О/О^`), keeping emitted paths clean and safe to
+  copy-paste.  The SQL output is unchanged: it keeps the raw prefix and
+  escapes single quotes for the SQL literal.  Both `mkdir` emission sites
+  (max-depth and leaf) are covered; the substitution is a pure parameter
+  expansion, so no subprocess is forked per row.
+  - New fixture `tests/case_apostrophe.txt` plus SHELL and SQL goldens
+    (`apostrophe_m6_x5.txt`, `apostrophe_m6_x5_sql.txt`) lock the behavior
+    in; the SHELL golden asserts `mkdir -p О/О^`, the SQL golden keeps
+    `('О/О''', …)`.
+  - **Latent test-suite fixes from the layout refactor.**  The suite had
+    been unrunnable since `1e75fbe` moved it into `tests/` and the tools
+    into `bin/`: its `SCRIPT_DIR` path logic still assumed it lived at the
+    repository root, and the sandbox/copy scratch names kept the `bin/`
+    prefix (`copy_bin/…` instead of `copy_build_shell_nested_authors.sh`).
+    Both are fixed (paths now resolve one level up via `../`, scratch
+    names are basenames), the stray `tests/tests/` directory is removed,
+    and the suite is green again under WSL: **30/30 checks** (was 28/28
+    pre-refactor + 2 new apostrophe cases).
+
 ## [Unreleased] - 2026-08-31
 
 - **Rename the backup root from `Backup_Nova3` to `Backup_Go7`** across the
