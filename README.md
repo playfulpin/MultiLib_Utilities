@@ -234,11 +234,30 @@ wsl.exe bash tests/test_utf8_prefix_generator.sh     # AWK generator: direct edg
 wsl.exe bash tests/test_e2e_pipeline.sh              # generator -> validator -> renderer on real data
 bash tests/test_merge_books_into_skeleton.sh         # archive -> skeleton merge (runs anywhere)
 bash tests/test_merge_skeleton_into_books.sh         # skeleton -> Books finalize (runs anywhere)
+bash tests/test_version_sync.sh                      # version locations agree (runs anywhere)
 ```
 
 Suites write nothing to the repository; each builds its scratch files in a
 temporary directory. The golden-based suites accept `--regen` to refresh their
 golden files.
+
+A new `tests/test_version_sync.sh` suite (runs anywhere) verifies that every
+tool's version is identical across all four tracked locations — header, lib
+twin, README release-table row, and RELEASE_NOTES shipped line. `bin/bump-version.sh`
+edits all four in one shot, so use it for every bump:
+
+```bash
+./bin/bump-version.sh build_shell_nested_authors 6.6.11
+```
+
+## Continuous integration
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push/PR: shell
+syntax check across `bin/` and `lib/`, the version-sync suite, and all eight
+test suites on `ubuntu-latest`. Linux bash is multibyte-capable, so the
+WSL-only constraint of the UTF-8 suites does not block CI; the merge/finalize
+suites run anywhere. This is what caught the two suites that had been broken
+since the layout refactor.
 
 ## Releases & versioning
 
@@ -276,6 +295,8 @@ bin/build_prefix_table.sh           prefix-table generator (working script)
 bin/prefix_table_integrity.sh       prefix-table validator
 bin/prefix_tree_visualizer.sh       prefix-tree renderer
 bin/build_shell_nested_authors.sh   nested-directory builder
+bin/build_prefix_table.sh           prefix-table generator
+bin/bump-version.sh                 bump one tool's version across header + docs
 bin/merge_books_into_skeleton.sh    archive -> skeleton merge tool
 bin/merge_skeleton_into_books.sh    skeleton -> Books finalize tool
 lib/merge_books_functions.sh        shared functions for the merge tool
@@ -283,8 +304,10 @@ lib/utf8_prefix_generator.awk       original AWK generator (parity reference)
 config/merge_books.conf             defaults for the merge tool (paths + behavior)
 config/merge_skeleton_into_books.conf   defaults for the finalize tool (paths)
 
-tests/test_*.sh                 regression suites (one per tool + e2e)
+tests/test_*.sh                 regression suites (one per tool + e2e + version sync)
 tests/                          fixtures and golden files
+
+.github/workflows/ci.yml        CI: syntax + version sync + all suites on push/PR
 
 docs/BOOK_LIBRARY_MERGE_PLAN.md        skeleton + merge design document
 

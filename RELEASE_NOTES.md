@@ -46,7 +46,13 @@ Books library.
 
 ## Testing
 
-- Prefix-table family: 96/96 checks green under WSL (prefix table 34, nested-authors 28, visualizer 12, AWK generator 11, e2e pipeline 11).
+- **CI (GitHub Actions):** every push/PR runs shell syntax checks, the
+  version-sync suite, and all eight test suites on `ubuntu-latest`.
+- Prefix-table family: green under WSL (prefix table, nested-authors,
+  visualizer, AWK generator, e2e pipeline) and in CI on Linux bash.
 - Merge tools: suites run under both Cygwin/MSYS bash and WSL.
   - `test_merge_books_into_skeleton.sh` — full coverage of dry-run, overwrite policies, config/env precedence, etc.
   - `test_merge_skeleton_into_books.sh` — dry-run, full run, `--no-rename`, `--from-pruned`, auto-detection, CLI, version header.
+- `test_version_sync.sh` — every tool's version identical across header,
+  lib twin, README table, and RELEASE_NOTES; backed by `bin/bump-version.sh`
+  which edits all locations in one command.

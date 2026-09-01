@@ -343,9 +343,17 @@ run_cli_tests() {
         "cli_bad_target|--source $sk --target /nonexistent"
         "cli_target_inside_source|--source $sk --target $sk/sub"
     )
+    # Isolate the flag-less "no args" case from the real machine: point the
+    # script's environment fallbacks at guaranteed-missing paths so it must
+    # fail on validation regardless of what exists under /mnt/c/Backup_Go7
+    # (a stray Empty_Skeleton once made this case exit 0 and run a real
+    # finalize).  Explicit flags in the other cases override these env vars.
     for c in "${ERROR_CASES[@]}"; do
         IFS='|' read -r label args <<< "$c"
-        run_script "$out" "$err" -- $args
+        MERGE_SOURCE_DIR="$TMPDIR/no_such_source" \
+        MERGE_TARGET_DIR="$TMPDIR/no_such_target" \
+        MERGE_REPORT_DIR="$TMPDIR/cli_reports" \
+            run_script "$out" "$err" -- $args
         if (( LAST_RC != 0 )); then
             report "$label" ok
         else

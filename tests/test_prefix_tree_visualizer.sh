@@ -46,7 +46,8 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$SCRIPT_DIR/../bin/prefix_tree_visualizer.sh"
-TESTS_DIR="$SCRIPT_DIR/tests"
+# The suite lives in tests/ together with its fixtures and goldens.
+TESTS_DIR="$SCRIPT_DIR"
 GOLDEN_DIR="$TESTS_DIR/golden"
 
 [[ -f "$SCRIPT" ]] || { echo "ERROR: $SCRIPT not found" >&2; exit 2; }

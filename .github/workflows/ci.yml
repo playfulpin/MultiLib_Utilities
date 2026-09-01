@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Shell syntax check
+        run: |
+          set -e
+          for f in bin/*.sh lib/*.awk; do
+            case "$f" in
+              *.sh) bash -n "$f" ;;
+              *.awk) gawk --lint --source 'BEGIN{}' -f "$f" >/dev/null ;;
+            esac
+            echo "ok: $f"
+          done
+
+      - name: Version sync check
+        run: bash tests/test_version_sync.sh
+
+      - name: Merge suites (run anywhere)
+        run: |
+          bash tests/test_merge_books_into_skeleton.sh
+          bash tests/test_merge_skeleton_into_books.sh
+
+      - name: UTF-8 suites (WSL-style, multibyte bash)
+        run: |
+          bash tests/test_build_shell_nested_authors.sh
+          bash tests/test_build_prefix_table.sh
+          bash tests/test_prefix_tree_visualizer.sh
+          bash tests/test_utf8_prefix_generator.sh
+          bash tests/test_e2e_pipeline.sh

@@ -53,7 +53,8 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$SCRIPT_DIR/../bin/build_prefix_table.sh"
-TESTS_DIR="$SCRIPT_DIR/tests"
+# The suite lives in tests/ together with its fixtures and goldens.
+TESTS_DIR="$SCRIPT_DIR"
 GOLDEN_DIR="$TESTS_DIR/golden"
 AWK_SCRIPT="$SCRIPT_DIR/../lib/utf8_prefix_generator.awk"
 
@@ -449,7 +450,7 @@ run_release_tests() {
     # the header itself -- the same single source of truth the script uses to
     # print "v<version>" in its usage text.
     for s in "bin/build_prefix_table.sh"; do
-        version="$(sed -n 's/^# Version:[[:space:]]*//p' "$SCRIPT_DIR/$s" | head -n 1)"
+        version="$(sed -n 's/^# Version:[[:space:]]*//p' "$SCRIPT_DIR/../$s" | head -n 1)"
         if [[ "$version" =~ ^1\.0\.[0-9]+$ ]]; then
             report "version_${s%.sh}" ok
         else

@@ -7,6 +7,37 @@ All notable changes to the author-toolchain scripts in this repository:
 `bin/merge_books_into_skeleton.sh`, and
 `bin/merge_skeleton_into_books.sh`.
 
+## [Unreleased] - 2026-09-01
+
+- **New development workflow: GitHub Actions CI + version automation.**
+  - `.github/workflows/ci.yml` runs on every push/PR: shell syntax check
+    across `bin/*.sh` and `lib/*.awk`, the new version-sync suite, all three
+    merge/finalize suites, and all five UTF-8 suites (Linux bash is
+    multibyte-capable, so the WSL-only constraint no longer blocks CI).  A
+    broken suite is now caught on day one instead of rotting unnoticed —
+    which is exactly what happened to two suites after the layout refactor.
+  - **Fixed the two remaining suites broken by the layout refactor:**
+    `tests/test_build_prefix_table.sh` and
+    `tests/test_prefix_tree_visualizer.sh` still resolved fixtures via
+    `TESTS_DIR="$SCRIPT_DIR/tests"` (pointing at `tests/tests/`) and the
+    prefix-table suite read its version header from `$SCRIPT_DIR/$s`
+    (`tests/bin/…`).  Both now resolve from `tests/` + `bin/` correctly,
+    making all eight suites runnable again.
+  - **Test-isolation fix in `tests/test_merge_skeleton_into_books.sh`:** the
+    `cli_no_args` case ran the script with no flags, letting it inherit the
+    real machine's config defaults — a stray `Empty_Skeleton` under
+    `/mnt/c/Backup_Go7` once made it exit 0 and run a real finalize.  The
+    case now injects guaranteed-missing `MERGE_SOURCE_DIR`/`MERGE_TARGET_DIR`/
+    `MERGE_REPORT_DIR` so it must fail validation regardless of machine state.
+
+- **New `bin/bump-version.sh` (v1.0.0).**  Bump one tool in a single command:
+  header comment, lib twin (merge_books_into_skeleton), README release-table
+  row (version + tag), and RELEASE_NOTES shipped-tools line — with shape
+  validation and refusal of non-increases.  Historical mentions in the docs
+  are left untouched; the new `tests/test_version_sync.sh` (7/7 green)
+  verifies all tracked locations agree, so version drift becomes a test
+  failure instead of a silent doc bug.
+
 ## [v1.0.0] - 2026-09-01
 
 **First production release** of the author toolchain.  This tag marks the
