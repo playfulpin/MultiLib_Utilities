@@ -16,6 +16,10 @@ All notable changes to the author-toolchain scripts in this repository:
     multibyte-capable, so the WSL-only constraint no longer blocks CI).  A
     broken suite is now caught on day one instead of rotting unnoticed —
     which is exactly what happened to two suites after the layout refactor.
+    The runner now installs `gawk` before the syntax step, since GitHub's
+    `ubuntu-latest` image ships `mawk` but not `gawk`, and the awk lint
+    (`gawk --lint`) previously failed the job in seconds with
+    `gawk: command not found`.
   - **Fixed the two remaining suites broken by the layout refactor:**
     `tests/test_build_prefix_table.sh` and
     `tests/test_prefix_tree_visualizer.sh` still resolved fixtures via
