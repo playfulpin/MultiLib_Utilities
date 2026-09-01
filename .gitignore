@@ -18,6 +18,7 @@ j_original
 out_*.txt
 *utf8*
 !test_utf8_prefix_generator.sh
+!lib/utf8_prefix_generator.awk
 
 # Compiled artifacts (sources prefix_children*.c are tracked)
 prefix_children

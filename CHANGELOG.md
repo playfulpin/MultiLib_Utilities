@@ -20,6 +20,14 @@ All notable changes to the author-toolchain scripts in this repository:
     `ubuntu-latest` image ships `mawk` but not `gawk`, and the awk lint
     (`gawk --lint`) previously failed the job in seconds with
     `gawk: command not found`.
+  - **Tracked `lib/utf8_prefix_generator.awk`:** the broad `*utf8*`
+    gitignore rule was silently excluding the AWK prefix-generator from the
+    repository, so CI checkouts had no `lib/*.awk` at all — the syntax-check
+    glob collapsed to the literal `lib/*.awk` and `gawk` died with "cannot
+    open source file". The tool is now negated in `.gitignore` and tracked,
+    and the syntax loop skips globs that match nothing (`[[ -f ]] ||
+    continue`), so a future empty directory degrades to a clean pass instead
+    of a cryptic `gawk` fatal.
   - **Fixed the two remaining suites broken by the layout refactor:**
     `tests/test_build_prefix_table.sh` and
     `tests/test_prefix_tree_visualizer.sh` still resolved fixtures via
