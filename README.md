@@ -127,9 +127,9 @@ destination files are never overwritten unless the user allows it. See
 
 ```bash
 ./bin/merge_books_into_skeleton.sh \
-    --source /mnt/c/Backup_Nova3/ToLoad/Author \
-    --skeleton /mnt/c/Backup_Nova3/Library \
-    --report-dir /mnt/c/Backup_Nova3/merge-reports \
+    --source /mnt/c/Backup_Go7/ToLoad/Author \
+    --skeleton /mnt/c/Backup_Go7/Library \
+    --report-dir /mnt/c/Backup_Go7/merge-reports \
     --dry-run
 ```
 
@@ -166,20 +166,20 @@ into the Books library in three safe steps:
 ```bash
 # Normal full run
 ./bin/merge_skeleton_into_books.sh \
-    --source /mnt/c/Backup_Nova3/Empty_Skeleton \
-    --target /mnt/c/Backup_Nova3/Books \
+    --source /mnt/c/Backup_Go7/Empty_Skeleton \
+    --target /mnt/c/Backup_Go7/Books \
     --dry-run
 
 # Start after prune (explicit)
 ./bin/merge_skeleton_into_books.sh \
-    --source /mnt/c/Backup_Nova3/BooksInput_20260830-223135 \
-    --target /mnt/c/Backup_Nova3/Books \
+    --source /mnt/c/Backup_Go7/BooksInput_20260830-223135 \
+    --target /mnt/c/Backup_Go7/Books \
     --from-pruned
 
 # Start after prune (auto-detected because name starts with BooksInput_)
 ./bin/merge_skeleton_into_books.sh \
-    --source /mnt/c/Backup_Nova3/BooksInput_20260830-223135 \
-    --target /mnt/c/Backup_Nova3/Books
+    --source /mnt/c/Backup_Go7/BooksInput_20260830-223135 \
+    --target /mnt/c/Backup_Go7/Books
 ```
 
 **Options**
@@ -189,7 +189,7 @@ into the Books library in three safe steps:
 | `-s, --source=DIR` | Source skeleton (or already-pruned `BooksInput_<ts>` folder) |
 | `-t, --target=DIR` | Books library to merge into (destination wins) |
 | `--timestamp=STAMP` | Suffix for the `BooksInput_<stamp>` name (default: `YYYYMMDD-HHMMSS`) |
-| `--report-dir=DIR` | Where the TSV report is written (default: `/mnt/c/Backup_Nova3/merge-reports`) |
+| `--report-dir=DIR` | Where the TSV report is written (default: `/mnt/c/Backup_Go7/merge-reports`) |
 | `--from-pruned` | Skip rename + prune; source is already a pruned `BooksInput_<ts>` folder |
 | `--no-rename` | Skip the rename step only |
 | `--no-prune` | Leave empty directories in place |
@@ -204,7 +204,7 @@ Two convenient ways to begin at step 3 (the safe copy):
 - `--from-pruned` — explicit request to skip rename + prune.
 - **Auto-detection** — if the basename of `--source` already matches `BooksInput_*`, rename and prune are skipped automatically.
 
-The staging / source folder is always retained intact. A TSV report is written for every run to the fixed directory `/mnt/c/Backup_Nova3/merge-reports`.
+The staging / source folder is always retained intact. A TSV report is written for every run to the fixed directory `/mnt/c/Backup_Go7/merge-reports`.
 
 ### `lib/utf8_prefix_generator.awk`
 
@@ -249,9 +249,9 @@ Releases are tagged with a tool-prefixed name:
 | `bin/build_prefix_table.sh` | 1.0.4 | `build_prefix_table-1.0.4` |
 | `bin/prefix_table_integrity.sh` | 1.2.1 | `prefix_table_integrity-1.2.1` |
 | `bin/prefix_tree_visualizer.sh` | 2.8.1 | `v2.8.1` |
-| `bin/build_shell_nested_authors.sh` | 6.6.8 | `v6.6.8` |
-| `bin/merge_books_into_skeleton.sh` | 0.1.2 | `merge_books_into_skeleton-0.1.2` |
-| `bin/merge_skeleton_into_books.sh` | 0.1.2 | `merge_skeleton_into_books-0.1.2` |
+| `bin/build_shell_nested_authors.sh` | 6.6.9 | `v6.6.9` |
+| `bin/merge_books_into_skeleton.sh` | 0.1.3 | `merge_books_into_skeleton-0.1.3` |
+| `bin/merge_skeleton_into_books.sh` | 0.1.3 | `merge_skeleton_into_books-0.1.3` |
 | `lib/utf8_prefix_generator.awk` | 1.1 | `utf8_prefix_generator-1.1` |
 
 `v2.8.1` and `v6.6.8` predate the tool-prefixed convention.

@@ -3,8 +3,8 @@
 ###############################################################################
 # bin/build_shell_nested_authors.sh
 #
-# Version:       6.6.8
-# Last updated:  2026-08-11 16:36
+# Version:       6.6.9
+# Last updated:  2026-08-31 20:24
 #
 # -----------------------------------------------------------------------------
 # PURPOSE
@@ -44,7 +44,7 @@
 # -----------------------------------------------------------------------------
 # OUTPUT
 # -----------------------------------------------------------------------------
-#   cd /mnt/c/Backup_Nova3/Empty_Skeleton
+#   cd /mnt/c/Backup_Go7/Empty_Skeleton
 #   mkdir -p А/Аб/Абр/Абра
 #
 #   With -f sql the same tree is emitted as SQL statements for the
@@ -106,7 +106,7 @@ readonly SCRIPT_VERSION="$(sed -n 's/^# Version:[[:space:]]*//p' "$0" | head -n 
 #   1. -r/--root-dir command-line flag
 #   2. ROOT_DIRECTORY environment variable
 #   3. built-in default below
-DEFAULT_ROOT_DIRECTORY="/mnt/c/Backup_Nova3/Empty_Skeleton"
+DEFAULT_ROOT_DIRECTORY="/mnt/c/Backup_Go7/Empty_Skeleton"
 ROOT_DIRECTORY="${ROOT_DIRECTORY:-$DEFAULT_ROOT_DIRECTORY}"
 
 # Defaults for the optional command-line switches (-m, -x, -d, -f, -c).

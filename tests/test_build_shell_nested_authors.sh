@@ -158,7 +158,7 @@ for s in "${SCRIPTS[@]}"; do
     base="${s%.sh}"
     SB[$s]="$tmp_root/sandbox_$base"
     mkdir -p "${SB[$s]}"
-    sed "s|/mnt/c/Backup_Nova3/Empty_Skeleton|${SB[$s]}|g" "$SCRIPT_DIR/$s" > "$tmp_root/copy_$base.sh"
+    sed "s|/mnt/c/Backup_Go7/Empty_Skeleton|${SB[$s]}|g" "$SCRIPT_DIR/$s" > "$tmp_root/copy_$base.sh"
     COPY[$s]="$tmp_root/copy_$base.sh"
 done
 

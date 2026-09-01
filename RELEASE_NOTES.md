@@ -9,13 +9,13 @@ Books library.
 
 ## Shipped tools
 
-- `bin/build_shell_nested_authors.sh` **6.6.8** — nested directory-tree builder (`mkdir -p` / SQL)
+- `bin/build_shell_nested_authors.sh` **6.6.9** — nested directory-tree builder (`mkdir -p` / SQL)
 - `bin/build_prefix_table.sh` **1.0.4** — pre-order trie prefix-table generator
 - `bin/prefix_table_integrity.sh` **1.2.1** — ultra-strict table validator
 - `bin/prefix_tree_visualizer.sh` **2.8.1** — Unicode tree renderer
 - `lib/utf8_prefix_generator.awk` **1.1** — original AWK generator (parity reference)
-- `bin/merge_books_into_skeleton.sh` **0.1.2** — safely copy a legacy archive into the skeleton
-- `bin/merge_skeleton_into_books.sh` **0.1.2** — finalize the skeleton into the Books library
+- `bin/merge_books_into_skeleton.sh` **0.1.3** — safely copy a legacy archive into the skeleton
+- `bin/merge_skeleton_into_books.sh` **0.1.3** — finalize the skeleton into the Books library
 
 ## Highlights
 
@@ -39,10 +39,10 @@ Books library.
   New in 0.1.2:
   - `--from-pruned` flag to start after the prune step
   - Auto-detection of `BooksInput_*` source names (skips rename + prune)
-  - Fixed default report directory: `/mnt/c/Backup_Nova3/merge-reports`
+  - Fixed default report directory: `/mnt/c/Backup_Go7/merge-reports`
   - `set -euo pipefail` restored (hardens rename/prune/copy against partial
     failures) and CLI parsing simplified to uniform `--flag VALUE` forms
-  - Config and examples aligned on `/mnt/c/Backup_Nova3/Books`
+  - Config and examples aligned on `/mnt/c/Backup_Go7/Books`
 
 ## Testing
 

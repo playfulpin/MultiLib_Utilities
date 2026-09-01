@@ -9,6 +9,15 @@ All notable changes to the author-toolchain scripts in this repository:
 
 ## [Unreleased] - 2026-08-31
 
+- **Rename the backup root from `Backup_Nova3` to `Backup_Go7`** across the
+  whole project: default directories, config files, usage examples,
+  documentation (`README.md`, `RELEASE_NOTES.md`, `docs/BOOK_LIBRARY_MERGE_PLAN.md`),
+  and the nested-authors suite's root-dir substitution.  The old name no
+  longer appears in any tracked file.  Version bumps per the 0.0.1 rule:
+  `bin/build_shell_nested_authors.sh` 6.6.8 → **6.6.9**,
+  `bin/merge_books_into_skeleton.sh` 0.1.2 → **0.1.3**, and
+  `bin/merge_skeleton_into_books.sh` 0.1.2 → **0.1.3**.
+
 - **`bin/merge_skeleton_into_books.sh` v0.1.2.**  Finalize tool hardening and
   cleanup:
   - `set -euo pipefail` restored (it was disabled during debugging) so a failed
@@ -19,7 +28,7 @@ All notable changes to the author-toolchain scripts in this repository:
   - `parse_arguments` simplified: uniform `--flag VALUE` and `--flag=VALUE`
     forms; the fragile `-s = DIR` and positional-argument forms are dropped
     (positional arguments now fail with a clear error).
-  - Config and README examples aligned on `TARGET_DIR=/mnt/c/Backup_Nova3/Books`
+  - Config and README examples aligned on `TARGET_DIR=/mnt/c/Backup_Go7/Books`
     (the docs previously showed a stray `/mnt/o/Books`).
   - Docs: version references bumped to 0.1.2, stray code fences removed from
     README and RELEASE_NOTES, the finalize config file listed in the repo
@@ -32,7 +41,7 @@ All notable changes to the author-toolchain scripts in this repository:
   - Auto-detection: if the source directory name starts with `BooksInput_`,
     rename and prune are skipped automatically (same effect as `--from-pruned`).
   - Default report directory changed to the fixed path
-    `/mnt/c/Backup_Nova3/merge-reports` so all reports are collected in one place.
+    `/mnt/c/Backup_Go7/merge-reports` so all reports are collected in one place.
   - Clear mode messages (`mode: from-pruned …` / `mode: auto-detected …`).
   - `RENAME` default now declared with the other configuration variables
     (avoids unbound-variable issues under `set -u`).
@@ -104,7 +113,7 @@ All notable changes to the author-toolchain scripts in this repository:
 - Added `docs/BOOK_LIBRARY_MERGE_PLAN.md`, documenting the approved next
   phase: build the author-prefix skeleton, resolve archive authors to the
   deepest valid prefix directory, and safely copy mixed-format books from
-  `C:\\Backup_Nova3\\ToLoad` without overwriting existing filenames. The first
+  `C:\\Backup_Go7\\ToLoad` without overwriting existing filenames. The first
   implementation will use dry-run reports and will leave multi-author expansion
   out of scope.
 

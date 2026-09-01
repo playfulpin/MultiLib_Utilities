@@ -3,8 +3,8 @@
 ###############################################################################
 # bin/merge_skeleton_into_books.sh
 #
-# Version:       0.1.2
-# Last updated:  2026-08-31 19:50
+# Version:       0.1.3
+# Last updated:  2026-08-31 20:24
 #
 # -----------------------------------------------------------------------------
 # PURPOSE
@@ -38,9 +38,9 @@
 set -euo pipefail
 
 # --- built-in defaults -------------------------------------------------------
-SOURCE_DIR="/mnt/c/Backup_Nova3/Empty_Skeleton"
-TARGET_DIR="/mnt/c/Backup_Nova3/Books"
-REPORT_DIR="/mnt/c/Backup_Nova3/merge-reports"
+SOURCE_DIR="/mnt/c/Backup_Go7/Empty_Skeleton"
+TARGET_DIR="/mnt/c/Backup_Go7/Books"
+REPORT_DIR="/mnt/c/Backup_Go7/merge-reports"
 DRY_RUN=false
 RENAME=true
 PRUNE_EMPTY=true
@@ -115,7 +115,7 @@ usage() {
     echo "" >&2
     echo "Optional:" >&2
     echo "      --timestamp=STAMP  Suffix for BooksInput_<stamp> [default: YYYYMMDD-HHMMSS]" >&2
-    echo "      --report-dir=DIR   Report directory [default: /mnt/c/Backup_Nova3/merge-reports]" >&2
+    echo "      --report-dir=DIR   Report directory [default: /mnt/c/Backup_Go7/merge-reports]" >&2
     echo "      --config=FILE      Load defaults from this config file" >&2
     echo "      --from-pruned      Skip rename + prune (source is already pruned)" >&2
     echo "      --no-rename        Skip the rename step only" >&2

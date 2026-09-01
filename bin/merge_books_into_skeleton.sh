@@ -3,8 +3,8 @@
 ###############################################################################
 # bin/merge_books_into_skeleton.sh
 #
-# Version:       0.1.2
-# Last updated:  2026-08-30 21:00
+# Version:       0.1.3
+# Last updated:  2026-08-31 20:24
 #
 # -----------------------------------------------------------------------------
 # PURPOSE
@@ -34,9 +34,9 @@
 # USAGE
 # -----------------------------------------------------------------------------
 #   ./bin/merge_books_into_skeleton.sh \
-#       --source /mnt/c/Backup_Nova3/ToLoad \
-#       --skeleton /mnt/c/Backup_Nova3/Empty_Skeleton \
-#       --report-dir /mnt/c/Backup_Nova3/merge-reports \
+#       --source /mnt/c/Backup_Go7/ToLoad \
+#       --skeleton /mnt/c/Backup_Go7/Empty_Skeleton \
+#       --report-dir /mnt/c/Backup_Go7/merge-reports \
 #       --dry-run
 #
 #   Always run --dry-run first and review the reports before a real copy.

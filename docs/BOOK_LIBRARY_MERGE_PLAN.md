@@ -12,13 +12,13 @@ each author.
 The source archive is:
 
 ```text
-C:\Backup_Nova3\ToLoad
+C:\Backup_Go7\ToLoad
 ```
 
 From WSL2, use:
 
 ```text
-/mnt/c/Backup_Nova3/ToLoad
+/mnt/c/Backup_Go7/ToLoad
 ```
 
 The archive contains mixed book formats. Author folders already exist, but use
@@ -44,7 +44,7 @@ cd /home/mike/GIT_ROOT/MultiLib_Utilities
   -i data/fixtures/authors_list_from_db.txt \
   -m 10 \
   -x 5 \
-  -r /mnt/c/Backup_Nova3/Library \
+  -r /mnt/c/Backup_Go7/Library \
   -c ON \
   > /tmp/build-author-skeleton.sh
 
@@ -88,9 +88,9 @@ The command is:
 
 ```bash
 ./bin/merge_books_into_skeleton.sh \
-  --source /mnt/c/Backup_Nova3/ToLoad/Author \
-  --skeleton /mnt/c/Backup_Nova3/Library \
-  --report-dir /mnt/c/Backup_Nova3/merge-reports \
+  --source /mnt/c/Backup_Go7/ToLoad/Author \
+  --skeleton /mnt/c/Backup_Go7/Library \
+  --report-dir /mnt/c/Backup_Go7/merge-reports \
   --dry-run
 ```
 
@@ -215,9 +215,9 @@ into the Books library in three safe steps:
 
 ```bash
 ./bin/merge_skeleton_into_books.sh \
-  --source /mnt/c/Backup_Nova3/Empty_Skeleton \
-  --target /mnt/c/Backup_Nova3/Books \
-  --report-dir /mnt/c/Backup_Nova3/merge-reports \
+  --source /mnt/c/Backup_Go7/Empty_Skeleton \
+  --target /mnt/c/Backup_Go7/Books \
+  --report-dir /mnt/c/Backup_Go7/merge-reports \
   --dry-run
 ```
 
