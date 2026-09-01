@@ -19,7 +19,7 @@ jobs:
         run: |
           set -e
           for f in bin/*.sh lib/*.awk; do
-            [[ -f "$f" ]] || continue
+            [ -e "$f" ] || continue  # Skip if file doesn't exist
             case "$f" in
               *.sh) bash -n "$f" ;;
               *.awk) gawk --lint --source 'BEGIN{}' -f "$f" >/dev/null ;;
