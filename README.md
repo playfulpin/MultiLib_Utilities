@@ -261,6 +261,10 @@ Releases are tagged with a tool-prefixed name:
 
 `v2.8.1` and `v6.6.8` predate the tool-prefixed convention.
 
+**`v1.0.0` is the first production release** of the toolchain as a whole,
+cut 2026-09-01 on top of the 6.6.10 tool work; it supersedes the individual
+tool tags as the repository-wide release marker.
+
 To cut a release: bump the header version, run the WSL test suites (see
 [Testing](#testing)), commit, then tag with the tool-prefixed name. See
 `CHANGELOG.md` for the full history and step-by-step workflow.

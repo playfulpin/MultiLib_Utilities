@@ -7,7 +7,12 @@ All notable changes to the author-toolchain scripts in this repository:
 `bin/merge_books_into_skeleton.sh`, and
 `bin/merge_skeleton_into_books.sh`.
 
-## [Unreleased] - 2026-09-01
+## [v1.0.0] - 2026-09-01
+
+**First production release** of the author toolchain.  This tag marks the
+whole repository as production-ready: the prefix-table generator, validator,
+renderer, the nested directory-tree builder, and the book-library merge +
+finalize tools, with their suites green under WSL.
 
 - **`bin/build_shell_nested_authors.sh` v6.6.10 — apostrophes in directory
   names.**  Author names may contain an apostrophe (e.g. `О'Брайен`), which
