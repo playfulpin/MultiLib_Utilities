@@ -15,7 +15,7 @@ Books library.
 - `bin/prefix_tree_visualizer.sh` **2.8.1** — Unicode tree renderer
 - `lib/utf8_prefix_generator.awk` **1.1** — original AWK generator (parity reference)
 - `bin/merge_books_into_skeleton.sh` **0.1.2** — safely copy a legacy archive into the skeleton
-- `bin/merge_skeleton_into_books.sh` **0.1.1** — finalize the skeleton into the Books library
+- `bin/merge_skeleton_into_books.sh` **0.1.2** — finalize the skeleton into the Books library
 
 ## Highlights
 
@@ -33,13 +33,16 @@ Books library.
   configurable overwrite policy, skip-list for Windows metadata, dry-run
   reports, and config-file / environment overrides.
 
-- **`merge_skeleton_into_books.sh` (0.1.1)**  
+- **`merge_skeleton_into_books.sh` (0.1.2)**  
   Finalizes a populated skeleton into the Books library in three safe steps
   (rename → prune empty directories → copy without overwriting).  
-  New in 0.1.1:
+  New in 0.1.2:
   - `--from-pruned` flag to start after the prune step
   - Auto-detection of `BooksInput_*` source names (skips rename + prune)
   - Fixed default report directory: `/mnt/c/Backup_Nova3/merge-reports`
+  - `set -euo pipefail` restored (hardens rename/prune/copy against partial
+    failures) and CLI parsing simplified to uniform `--flag VALUE` forms
+  - Config and examples aligned on `/mnt/c/Backup_Nova3/Books`
 
 ## Testing
 
@@ -47,4 +50,3 @@ Books library.
 - Merge tools: suites run under both Cygwin/MSYS bash and WSL.
   - `test_merge_books_into_skeleton.sh` — full coverage of dry-run, overwrite policies, config/env precedence, etc.
   - `test_merge_skeleton_into_books.sh` — dry-run, full run, `--no-rename`, `--from-pruned`, auto-detection, CLI, version header.
-```

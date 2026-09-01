@@ -9,6 +9,23 @@ All notable changes to the author-toolchain scripts in this repository:
 
 ## [Unreleased] - 2026-08-31
 
+- **`bin/merge_skeleton_into_books.sh` v0.1.2.**  Finalize tool hardening and
+  cleanup:
+  - `set -euo pipefail` restored (it was disabled during debugging) so a failed
+    `mv`, `cp`, or `find` aborts the run instead of silently continuing a
+    half-finished merge.
+  - The trailing report line is now an explicit `if` — a missing report can no
+    longer flip the script's exit code.
+  - `parse_arguments` simplified: uniform `--flag VALUE` and `--flag=VALUE`
+    forms; the fragile `-s = DIR` and positional-argument forms are dropped
+    (positional arguments now fail with a clear error).
+  - Config and README examples aligned on `TARGET_DIR=/mnt/c/Backup_Nova3/Books`
+    (the docs previously showed a stray `/mnt/o/Books`).
+  - Docs: version references bumped to 0.1.2, stray code fences removed from
+    README and RELEASE_NOTES, the finalize config file listed in the repo
+    layout, and `HH:MM` restored to the header timestamp.
+  - Suite: 27/27 checks green.
+
 - **`bin/merge_skeleton_into_books.sh` v0.1.1.**  Finalize tool improvements:
   - New flag `--from-pruned`: skip rename + prune when the source is already a
     cleared `BooksInput_<timestamp>` folder.
@@ -252,4 +269,3 @@ released tool follows the same pattern:
    timestamp.
 3. **Run the relevant test suite(s)** under WSL.
 4. **Commit** with a clear message and **tag** with the tool-prefixed name.
-```

@@ -167,19 +167,19 @@ into the Books library in three safe steps:
 # Normal full run
 ./bin/merge_skeleton_into_books.sh \
     --source /mnt/c/Backup_Nova3/Empty_Skeleton \
-    --target /mnt/o/Books \
+    --target /mnt/c/Backup_Nova3/Books \
     --dry-run
 
 # Start after prune (explicit)
 ./bin/merge_skeleton_into_books.sh \
     --source /mnt/c/Backup_Nova3/BooksInput_20260830-223135 \
-    --target /mnt/o/Books \
+    --target /mnt/c/Backup_Nova3/Books \
     --from-pruned
 
 # Start after prune (auto-detected because name starts with BooksInput_)
 ./bin/merge_skeleton_into_books.sh \
     --source /mnt/c/Backup_Nova3/BooksInput_20260830-223135 \
-    --target /mnt/o/Books
+    --target /mnt/c/Backup_Nova3/Books
 ```
 
 **Options**
@@ -251,7 +251,7 @@ Releases are tagged with a tool-prefixed name:
 | `bin/prefix_tree_visualizer.sh` | 2.8.1 | `v2.8.1` |
 | `bin/build_shell_nested_authors.sh` | 6.6.8 | `v6.6.8` |
 | `bin/merge_books_into_skeleton.sh` | 0.1.2 | `merge_books_into_skeleton-0.1.2` |
-| `bin/merge_skeleton_into_books.sh` | 0.1.1 | `merge_skeleton_into_books-0.1.1` |
+| `bin/merge_skeleton_into_books.sh` | 0.1.2 | `merge_skeleton_into_books-0.1.2` |
 | `lib/utf8_prefix_generator.awk` | 1.1 | `utf8_prefix_generator-1.1` |
 
 `v2.8.1` and `v6.6.8` predate the tool-prefixed convention.
@@ -272,6 +272,7 @@ bin/merge_skeleton_into_books.sh    skeleton -> Books finalize tool
 lib/merge_books_functions.sh        shared functions for the merge tool
 lib/utf8_prefix_generator.awk       original AWK generator (parity reference)
 config/merge_books.conf             defaults for the merge tool (paths + behavior)
+config/merge_skeleton_into_books.conf   defaults for the finalize tool (paths)
 
 tests/test_*.sh                 regression suites (one per tool + e2e)
 tests/                          fixtures and golden files
@@ -287,4 +288,3 @@ _Old_Stuff/ , _Save_Stuff/      archived/scratch files (git-ignored)
 
 See `CHANGELOG.md` for the full release history and the step-by-step release
 workflow.
-```

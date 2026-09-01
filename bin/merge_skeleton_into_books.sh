@@ -3,86 +3,101 @@
 ###############################################################################
 # bin/merge_skeleton_into_books.sh
 #
-# Version:       0.1.1
-# Last updated:  2026-08-31
+# Version:       0.1.2
+# Last updated:  2026-08-31 19:50
 #
 # -----------------------------------------------------------------------------
 # PURPOSE
 # -----------------------------------------------------------------------------
-#   Finalize a populated author-prefix skeleton (Empty_Skeleton) into the
-#   Books library in three safe steps:
+#   Finalize a populated author-prefix skeleton into the Books library in
+#   three safe steps:
 #
 #     1. rename the skeleton to a timestamped staging folder BooksInput_<ts>;
 #     2. remove every empty directory inside the staging folder;
 #     3. copy the remaining content into the Books library, never
 #        overwriting an existing folder or file (the destination wins).
 #
-#   The staging folder is the INPUT.  Nothing in it is deleted except empty
-#   directories, and after the copy it is left intact so you can inspect or
-#   reuse it.  This is the finalize step that comes after building the
-#   skeleton and merging the archive books into it.
-#
-#   Starting after the prune step
-#   -----------------------------
-#   Two convenient ways to begin at step 3 (the merge/copy):
-#
-#     • --from-pruned
-#         Explicitly skip rename + prune.  Recommended when the source is
-#         already a pruned BooksInput_<timestamp> folder.
-#
-#     • Auto-detection
-#         If the basename of --source already matches BooksInput_*, rename
-#         and prune are skipped automatically.
+#   Starting after the prune step is supported in two ways:
+#     • --from-pruned          (explicit)
+#     • source name BooksInput_* (auto-detected)
 #
 # -----------------------------------------------------------------------------
-# EXAMPLES
+# CONFIGURATION PRIORITY
 # -----------------------------------------------------------------------------
-#   # Normal full run
-#   ./bin/merge_skeleton_into_books.sh \
-#       --source /mnt/c/Backup_Nova3/Empty_Skeleton \
-#       --target /mnt/o/Books \
-#       --dry-run
+#   flag > environment variable > config file > built-in default
 #
-#   # Start after prune (explicit)
-#   ./bin/merge_skeleton_into_books.sh \
-#       --source /mnt/c/Backup_Nova3/BooksInput_20260831-143000 \
-#       --target /mnt/o/Books \
-#       --from-pruned
+#   Environment variables:
+#     MERGE_SOURCE_DIR, MERGE_TARGET_DIR, MERGE_REPORT_DIR
 #
-#   # Start after prune (auto-detected because name starts with BooksInput_)
-#   ./bin/merge_skeleton_into_books.sh \
-#       --source /mnt/c/Backup_Nova3/BooksInput_20260831-143000 \
-#       --target /mnt/o/Books
-#
-#   Always run --dry-run first and review the report, then drop --dry-run
-#   to actually rename, prune, and copy.
-#
-# -----------------------------------------------------------------------------
-# REPORT
-# -----------------------------------------------------------------------------
-#   A TSV report is written to:
-#     /mnt/c/Backup_Nova3/merge-reports/merge_skeleton_into_books_<timestamp>.tsv
-#
-#   One row per file with status `copied` or `kept-existing`
-#   (in a dry run `would-copy` / `would-keep`).
-#   Nothing in the library or the staging folder is modified by a dry run.
+#   Config file (optional):
+#     config/merge_skeleton_into_books.conf
+#     or any file given with --config=FILE
 #
 ###############################################################################
 
 set -euo pipefail
 
-# --- configuration (flag > default) ------------------------------------------
+# --- built-in defaults -------------------------------------------------------
 SOURCE_DIR="/mnt/c/Backup_Nova3/Empty_Skeleton"
 TARGET_DIR="/mnt/c/Backup_Nova3/Books"
+REPORT_DIR="/mnt/c/Backup_Nova3/merge-reports"
 DRY_RUN=false
 RENAME=true
 PRUNE_EMPTY=true
-TIMESTAMP="$(date '+%Y%m%d-%H%M%S')"
-REPORT_DIR="/mnt/c/Backup_Nova3/merge-reports"
 FROM_PRUNED=false
-
-# --- globals used only by main() ---------------------------------------------
+TIMESTAMP="$(date '+%Y%m%d-%H%M%S')"
+CONFIG_FILE=""
 REPORT_FILE=""
+
+# -----------------------------------------------------------------------------
+# load_config
+# -----------------------------------------------------------------------------
+load_config() {
+    local file="$1"
+    [[ -f "$file" ]] || return 0
+
+    local line key value
+    # Use process substitution + || true so a missing final newline never
+    # triggers set -e.
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # skip comments and blank lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line//[[:space:]]/}" ]] && continue
+
+        key="${line%%=*}"
+        value="${line#*=}"
+
+        # trim whitespace
+        key="${key#"${key%%[![:space:]]*}"}"
+        key="${key%"${key##*[![:space:]]}"}"
+        value="${value#"${value%%[![:space:]]*}"}"
+        value="${value%"${value##*[![:space:]]}"}"
+
+        case "$key" in
+            SOURCE_DIR) SOURCE_DIR="$value" ;;
+            TARGET_DIR) TARGET_DIR="$value" ;;
+            REPORT_DIR) REPORT_DIR="$value" ;;
+            *)
+                echo "Warning: unknown config key '$key' in $file (ignored)" >&2
+                ;;
+        esac
+    done < "$file" || true
+}
+
+# -----------------------------------------------------------------------------
+# apply_environment
+# -----------------------------------------------------------------------------
+apply_environment() {
+    if [[ -n "${MERGE_SOURCE_DIR:-}" ]]; then
+        SOURCE_DIR="$MERGE_SOURCE_DIR"
+    fi
+    if [[ -n "${MERGE_TARGET_DIR:-}" ]]; then
+        TARGET_DIR="$MERGE_TARGET_DIR"
+    fi
+    if [[ -n "${MERGE_REPORT_DIR:-}" ]]; then
+        REPORT_DIR="$MERGE_REPORT_DIR"
+    fi
+}
 
 # -----------------------------------------------------------------------------
 # usage
@@ -92,42 +107,33 @@ usage() {
     version="$(sed -n 's/^# Version:[[:space:]]*//p' "$0" | head -n 1)"
     echo "bin/merge_skeleton_into_books.sh v$version" >&2
     echo "" >&2
-    echo "Usage: $0 --source=DIR --target=DIR [OPTIONS]" >&2
+    echo "Usage: $0 [OPTIONS] --source=DIR --target=DIR" >&2
     echo "" >&2
     echo "Required:" >&2
-    echo "  -s, --source=DIR  Source skeleton to rename (then prune + copy)" >&2
-    echo "  -t, --target=DIR  Books library to merge into (destination wins)" >&2
+    echo "  -s, --source=DIR     Source skeleton (or BooksInput_* folder)" >&2
+    echo "  -t, --target=DIR     Books library to merge into" >&2
     echo "" >&2
     echo "Optional:" >&2
-    echo "      --timestamp=STAMP  Suffix for the BooksInput_<stamp> name" >&2
-    echo "                         [default: YYYYMMDD-HHMMSS]" >&2
-    echo "      --report-dir=DIR   Where the TSV report file is written" >&2
-    echo "                         [default: /mnt/c/Backup_Nova3/merge-reports]" >&2
-    echo "      --from-pruned      Skip rename + prune; source is already a" >&2
-    echo "                         pruned BooksInput_<ts> folder" >&2
-    echo "      --no-rename        Skip the rename to BooksInput_<stamp>" >&2
+    echo "      --timestamp=STAMP  Suffix for BooksInput_<stamp> [default: YYYYMMDD-HHMMSS]" >&2
+    echo "      --report-dir=DIR   Report directory [default: /mnt/c/Backup_Nova3/merge-reports]" >&2
+    echo "      --config=FILE      Load defaults from this config file" >&2
+    echo "      --from-pruned      Skip rename + prune (source is already pruned)" >&2
+    echo "      --no-rename        Skip the rename step only" >&2
     echo "      --no-prune         Leave empty directories in place" >&2
-    echo "      --dry-run          Show the steps and report, change nothing" >&2
-    echo "  -v, --version          Print the version and exit 0" >&2
-    echo "  -h, --help             Show this help message" >&2
+    echo "      --dry-run          Show steps and write report, change nothing" >&2
+    echo "  -v, --version          Print version and exit 0" >&2
+    echo "  -h, --help             Show this help" >&2
     echo "" >&2
-    echo "Notes:" >&2
-    echo "  • If the source directory name already starts with BooksInput_," >&2
-    echo "    rename and prune are skipped automatically (same effect as" >&2
-    echo "    --from-pruned)." >&2
+    echo "Priority: flag > environment > config file > built-in default" >&2
+    echo "Environment: MERGE_SOURCE_DIR, MERGE_TARGET_DIR, MERGE_REPORT_DIR" >&2
 }
 
 # -----------------------------------------------------------------------------
 # parse_arguments
 # -----------------------------------------------------------------------------
 parse_arguments() {
-    local arg flag value
-    local source_pos="" target_pos=""
-
     while (( $# > 0 )); do
-        arg="$1"
-
-        case "$arg" in
+        case "$1" in
             -h|--help)
                 usage
                 exit 1
@@ -149,95 +155,60 @@ parse_arguments() {
                 PRUNE_EMPTY=false
                 ;;
             --timestamp=*)
-                TIMESTAMP="${arg#*=}"
+                TIMESTAMP="${1#*=}"
                 ;;
             --timestamp)
-                if (( $# < 2 )); then
-                    echo "Error: --timestamp requires a value." >&2
-                    exit 1
-                fi
-                TIMESTAMP="$2"
                 shift
+                [[ $# -gt 0 ]] || { echo "Error: --timestamp requires a value." >&2; exit 1; }
+                TIMESTAMP="$1"
                 ;;
             --report-dir=*)
-                REPORT_DIR="${arg#*=}"
+                REPORT_DIR="${1#*=}"
                 ;;
             --report-dir)
-                if (( $# < 2 )); then
-                    echo "Error: --report-dir requires a value." >&2
-                    exit 1
-                fi
-                REPORT_DIR="$2"
                 shift
+                [[ $# -gt 0 ]] || { echo "Error: --report-dir requires a value." >&2; exit 1; }
+                REPORT_DIR="$1"
                 ;;
-            -s=*|--source=*|-t=*|--target=*)
-                flag="${arg%%=*}"
-                value="${arg#*=}"
-                if [[ -z "$value" ]]; then
-                    echo "Error: $flag requires a value." >&2
-                    exit 1
-                fi
-                case "$flag" in
-                    -s|--source) SOURCE_DIR="$value" ;;
-                    -t|--target) TARGET_DIR="$value" ;;
-                esac
+            --config=*)
+                CONFIG_FILE="${1#*=}"
                 ;;
-            -s|--source|-t|--target)
-                if (( $# < 2 )); then
-                    echo "Error: $arg requires a value." >&2
-                    exit 1
-                fi
-                value="$2"
-                if [[ "$value" == "=" ]]; then
-                    if (( $# < 3 )); then
-                        echo "Error: $arg requires a value." >&2
-                        exit 1
-                    fi
-                    value="$3"
-                    shift
-                elif [[ "$value" == =* ]]; then
-                    value="${value#=}"
-                fi
-                case "$arg" in
-                    -s|--source) SOURCE_DIR="$value" ;;
-                    -t|--target) TARGET_DIR="$value" ;;
-                esac
+            --config)
                 shift
+                [[ $# -gt 0 ]] || { echo "Error: --config requires a value." >&2; exit 1; }
+                CONFIG_FILE="$1"
+                ;;
+            -s|--source)
+                shift
+                [[ $# -gt 0 ]] || { echo "Error: --source requires a value." >&2; exit 1; }
+                SOURCE_DIR="$1"
+                ;;
+            -s=*|--source=*)
+                SOURCE_DIR="${1#*=}"
+                ;;
+            -t|--target)
+                shift
+                [[ $# -gt 0 ]] || { echo "Error: --target requires a value." >&2; exit 1; }
+                TARGET_DIR="$1"
+                ;;
+            -t=*|--target=*)
+                TARGET_DIR="${1#*=}"
                 ;;
             --)
                 shift
-                while (( $# > 0 )); do
-                    if [[ -z "$source_pos" ]]; then
-                        SOURCE_DIR="$1"; source_pos=1
-                    elif [[ -z "$target_pos" ]]; then
-                        TARGET_DIR="$1"; target_pos=1
-                    else
-                        echo "Error: Too many positional arguments." >&2
-                        usage
-                        exit 1
-                    fi
-                    shift
-                done
                 break
                 ;;
             -*)
-                echo "Error: Unexpected option or argument '$arg'." >&2
+                echo "Error: unexpected option '$1'." >&2
                 usage
                 exit 1
                 ;;
             *)
-                if [[ -z "$source_pos" ]]; then
-                    SOURCE_DIR="$arg"; source_pos=1
-                elif [[ -z "$target_pos" ]]; then
-                    TARGET_DIR="$arg"; target_pos=1
-                else
-                    echo "Error: Too many positional arguments." >&2
-                    usage
-                    exit 1
-                fi
+                echo "Error: unexpected argument '$1'." >&2
+                usage
+                exit 1
                 ;;
         esac
-
         shift
     done
 }
@@ -254,8 +225,32 @@ report_row() {
 # main
 # -----------------------------------------------------------------------------
 main() {
+    # ------------------------------------------------------------------
+    # 1. Load config file (lowest priority after built-in defaults)
+    # ------------------------------------------------------------------
+    local script_dir default_config
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    default_config="$script_dir/../config/merge_skeleton_into_books.conf"
+
+    if [[ -n "$CONFIG_FILE" ]]; then
+        load_config "$CONFIG_FILE"
+    elif [[ -f "$default_config" ]]; then
+        load_config "$default_config"
+    fi
+
+    # ------------------------------------------------------------------
+    # 2. Environment variables override config
+    # ------------------------------------------------------------------
+    apply_environment
+
+    # ------------------------------------------------------------------
+    # 3. Command-line flags override everything
+    # ------------------------------------------------------------------
     parse_arguments "$@"
 
+    # ------------------------------------------------------------------
+    # Validation
+    # ------------------------------------------------------------------
     [[ -n "$SOURCE_DIR" ]] || { echo "Error: no source given (--source)." >&2; usage; exit 1; }
     [[ -n "$TARGET_DIR" ]] || { echo "Error: no target given (--target)." >&2; usage; exit 1; }
     [[ -d "$SOURCE_DIR" ]] || { echo "Error: source '$SOURCE_DIR' is not a directory." >&2; exit 1; }
@@ -263,7 +258,7 @@ main() {
 
     case "$SOURCE_DIR" in
         ""|"/"|"//"|"$HOME"|"$HOME"/*)
-            echo "Error: refusing to rename dangerous source path '$SOURCE_DIR'." >&2
+            echo "Error: refusing to operate on dangerous source path '$SOURCE_DIR'." >&2
             exit 1
             ;;
     esac
@@ -275,7 +270,7 @@ main() {
     esac
 
     # ------------------------------------------------------------------
-    # Decide whether we are starting after the prune step
+    # Decide whether we start after the prune step
     # ------------------------------------------------------------------
     local source_base
     source_base="$(basename "$SOURCE_DIR")"
@@ -288,7 +283,6 @@ main() {
         fi
         echo "mode: from-pruned (skip rename + prune)"
     elif [[ "$source_base" == BooksInput_* ]]; then
-        # Auto-detect: source already looks like a staging folder
         RENAME=false
         PRUNE_EMPTY=false
         echo "mode: auto-detected BooksInput_* source → skip rename + prune"
@@ -298,7 +292,9 @@ main() {
         echo "## DRY RUN - nothing will be changed ##"
     fi
 
-    # --- step 1: rename -------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Step 1: rename
+    # ------------------------------------------------------------------
     local source_parent staging tree_source
     source_parent="$(cd "$(dirname "$SOURCE_DIR")" && pwd)"
     staging="$source_parent/BooksInput_$TIMESTAMP"
@@ -322,7 +318,9 @@ main() {
         fi
     fi
 
-    # --- step 2: prune empty directories -------------------------------------
+    # ------------------------------------------------------------------
+    # Step 2: prune empty directories
+    # ------------------------------------------------------------------
     if [[ "$PRUNE_EMPTY" == false ]]; then
         echo "step 2: skip empty-directory pruning."
     else
@@ -346,10 +344,12 @@ main() {
         fi
     fi
 
-    # --- step 3: merge (copy, never overwrite) --------------------------------
+    # ------------------------------------------------------------------
+    # Step 3: copy (never overwrite)
+    # ------------------------------------------------------------------
     mkdir -p "$REPORT_DIR"
     REPORT_FILE="$REPORT_DIR/merge_skeleton_into_books_$TIMESTAMP.tsv"
-    if ! { printf 'source_file\ttarget_file\tstatus\treason\n' > "$REPORT_FILE"; }; then
+    if ! printf 'source_file\ttarget_file\tstatus\treason\n' > "$REPORT_FILE"; then
         echo "Warning: cannot write report '$REPORT_FILE'; continuing without one." >&2
         REPORT_FILE=""
     fi
@@ -390,7 +390,9 @@ main() {
             echo "source folder retained at: $tree_source"
         fi
     fi
-    [[ -n "$REPORT_FILE" ]] && echo "report: $REPORT_FILE"
+    if [[ -n "$REPORT_FILE" ]]; then
+        echo "report: $REPORT_FILE"
+    fi
 }
 
 main "$@"
