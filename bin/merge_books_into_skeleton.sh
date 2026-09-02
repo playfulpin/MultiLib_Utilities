@@ -3,51 +3,66 @@
 ###############################################################################
 # bin/merge_books_into_skeleton.sh
 #
-# Version:       0.1.3
-# Last updated:  2026-08-31 20:24
+# Version:       0.2.0
+# Last updated:  2026-09-01
 #
 # -----------------------------------------------------------------------------
 # PURPOSE
 # -----------------------------------------------------------------------------
-#   Merge a legacy book archive into a pre-built author-prefix skeleton.
-#   Every top-level folder of the source archive is treated as an author;
-#   its files are copied into a directory named after the author, placed
-#   under the deepest skeleton prefix that matches the author name.
-#   Book-series subfolders are copied recursively by default, preserving
-#   their relative layout.  Windows metadata files (desktop.ini, Thumbs.db
-#   by default) are never copied.
+#   Merge a legacy book archive into an author-prefix hierarchy built IN
+#   MEMORY from a flat author list.  Every top-level folder of the source
+#   archive is treated as an author; its files are copied into a directory
+#   named after the author, placed under the deepest valid prefix that
+#   matches the author name.  Book-series subfolders are copied recursively
+#   by default, preserving their relative layout.  Windows metadata files
+#   (desktop.ini, Thumbs.db by default) are never copied.
 #
-#   The skeleton is the source of truth and is never modified (no new
-#   directories, no unapproved overwrites).  See
-#   docs/BOOK_LIBRARY_MERGE_PLAN.md for the full design.
+#   The prefix tree uses the same range-walk algorithm as
+#   bin/build_shell_nested_authors.sh (>= MINIMUM_AUTHORS authors per
+#   prefix, capped at MAX_PREFIX_LENGTH), so the layout matches the old
+#   on-disk skeleton -- but nothing is built to disk first: the old
+#   Empty_Skeleton staging folder no longer exists.
+#
+#   Output goes straight into a timestamped, pruned staging tree:
+#
+#       <output-root>/BooksInput_<timestamp>/
+#           Т/То/Тол/Толс/Толстой Лев Николаевич/...
+#
+#   Only directories that actually receive a copied file are created, so the
+#   tree is pruned by construction.  The finalize step then rsyncs this tree
+#   into the Books library (see bin/merge_skeleton_into_books.sh).
 #
 # -----------------------------------------------------------------------------
 # CONFIGURATION
 # -----------------------------------------------------------------------------
 #   Every setting resolves flag > env var > config file > built-in default.
 #   The optional config file is config/merge_books.conf (keys:
-#   MERGE_SOURCE_DIR, MERGE_SKELETON_ROOT, MERGE_REPORT_DIR,
-#   MERGE_RECURSIVE, MERGE_OVERWRITE).  --dry-run is intentionally not
-#   configurable.
+#   MERGE_INPUT_FILE, MERGE_SOURCE_DIR, MERGE_OUTPUT_DIR, MERGE_REPORT_DIR,
+#   MERGE_RECURSIVE, MERGE_OVERWRITE, MERGE_MIN_AUTHORS, MERGE_MAX_PREFIX,
+#   MERGE_SKIP_NAMES).  --dry-run is intentionally not configurable.
 #
 # -----------------------------------------------------------------------------
 # USAGE
 # -----------------------------------------------------------------------------
 #   ./bin/merge_books_into_skeleton.sh \
 #       --source /mnt/c/Backup_Go7/ToLoad \
-#       --skeleton /mnt/c/Backup_Go7/Empty_Skeleton \
+#       --input-file data/fixtures/authors_list_from_db.txt \
+#       --output-root /mnt/c/Backup_Go7 \
 #       --report-dir /mnt/c/Backup_Go7/merge-reports \
 #       --dry-run
 #
 #   Always run --dry-run first and review the reports before a real copy.
-#   The real copy omits --dry-run.  Use --no-recursive to copy only direct
-#   files, and --overwrite=force to replace existing destination files.
+#   The real copy omits --dry-run and writes into
+#   /mnt/c/Backup_Go7/BooksInput_<timestamp>.  Use --no-recursive to copy
+#   only direct files, and --overwrite=force to replace existing destination
+#   files.  A duplicate staging name is an error; pass --timestamp to pick
+#   a different suffix.
 #
 # -----------------------------------------------------------------------------
 # REPORTS (written to REPORT_DIR)
 # -----------------------------------------------------------------------------
 #   merge-manifest.tsv      one row per processed source child
-#   unmatched-authors.tsv   authors with no matching skeleton prefix
+#   unmatched-authors.tsv   authors with no matching prefix
 #   ambiguous-authors.tsv   authors whose longest prefix has several paths
 #   duplicates.tsv          destination name already existed / copied twice
 #   collisions.tsv          same destination name written by 2 sources in-run

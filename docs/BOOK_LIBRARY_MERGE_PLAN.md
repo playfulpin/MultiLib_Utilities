@@ -1,13 +1,14 @@
 # Book library skeleton and merge plan
 
-**Status:** Implemented (pipeline: merge v0.1.2 + finalize v0.1.0)  
-**Updated:** 2026-08-30
+**Status:** Implemented (refactored pipeline: in-memory merge v0.2.0 + rsync finalize v0.2.0)  
+**Updated:** 2026-09-01
 
 ## Goal
 
-Build an author-prefix directory skeleton with the existing tools, then copy
+Build an author-prefix directory hierarchy with the existing tools, then copy
 books from the existing archive into the deepest valid prefix directory for
-each author.
+each author — without materializing an `Empty_Skeleton` staging folder on
+disk.
 
 The source archive is:
 
@@ -22,102 +23,142 @@ From WSL2, use:
 ```
 
 The archive contains mixed book formats. Author folders already exist, but use
-a different structure from the new skeleton:
+a different structure from the new hierarchy:
 
 ```text
 ToLoad/
 └── Author/
     ├── <author-name>/
     │   ├── book files
-    │   └── optional nested folders
+    │   └── optional nested folders (book series)
     └── ...
 ```
 
-## Phase 1: build the skeleton
+## The two-step pipeline
 
-Use `bin/build_shell_nested_authors.sh` with the canonical author list:
+```
+step 1   bin/merge_books_into_skeleton.sh       step 2   bin/merge_skeleton_into_books.sh
+ToLoad ──────────────────────────────► BooksInput_<ts> ──────────────────────► Books
+authors_list_from_db.txt              (pruned, timestamped)                    (rsync, destination wins)
+```
+
+There is **no `build_shell_nested_authors.sh → Empty_Skeleton` on-disk skeleton
+stage** any more:
+
+- `bin/merge_books_into_skeleton.sh` computes the prefix tree **in memory**
+  from the flat author list and writes books straight into a timestamped,
+  pruned staging tree `BooksInput_<timestamp>`.
+- `bin/merge_skeleton_into_books.sh` is a thin, validated **rsync** wrapper
+  that syncs the staging tree into Books with `--ignore-existing` (the
+  destination wins — nothing is ever overwritten). The old rename → prune →
+  copy loop is gone, because the merge tool already emits the staging tree
+  under its final `BooksInput_<ts>` name, already pruned.
+
+`bin/build_shell_nested_authors.sh` remains in the toolchain for generating
+`mkdir -p` scripts and the SQL nested-set table
+(`dictionary_nested_set`); the book-merge pipeline no longer consumes its
+output.
+
+## Step 1: merge the archive into the in-memory hierarchy
 
 ```bash
 cd /home/mike/GIT_ROOT/MultiLib_Utilities
 
-./bin/build_shell_nested_authors.sh \
-  -i data/fixtures/authors_list_from_db.txt \
-  -m 10 \
-  -x 5 \
-  -r /mnt/c/Backup_Go7/Library \
-  -c ON \
-  > /tmp/build-author-skeleton.sh
-
-bash /tmp/build-author-skeleton.sh
-```
-
-Always test with a temporary destination first. The source archive must not be
-modified.
-
-The skeleton builder creates only valid prefix directories. It does not create
-an additional directory named after each author; the merge tool adds that
-folder below the matched prefix.
-
-## Phase 2: resolve an archive author
-
-The merge tool will use the direct folder names under `ToLoad/Author/` as the
-source author names. It will inspect the existing skeleton and select the
-**deepest valid prefix directory** whose path corresponds to the beginning of
-the author name, then place a folder named after the author below it.
-
-Example:
-
-```text
-Source author:  Толстой Лев Николаевич
-Destination:   Т/То/Толс/Толстой Лев Николаевич/
-```
-
-The skeleton itself holds only prefix directories; the author folder is a
-merge-time extension below the matched prefix, so authors sharing a prefix
-stay separate. If the matched prefix is already the author's own folder (from
-a previous run), the author is not appended twice.
-
-The skeleton is the source of truth for valid destination paths. If no matching
-path exists, the author is reported as unmatched and no files are copied. If a
-match is ambiguous, the author is reported and no files are copied until the
-ambiguity is resolved.
-
-## Phase 3: copy books
-
-The command is:
-
-```bash
 ./bin/merge_books_into_skeleton.sh \
-  --source /mnt/c/Backup_Go7/ToLoad/Author \
-  --skeleton /mnt/c/Backup_Go7/Library \
+  --source /mnt/c/Backup_Go7/ToLoad \
+  --input-file data/fixtures/authors_list_from_db.txt \
+  --output-root /mnt/c/Backup_Go7 \
+  --min-authors 10 \
+  --max-prefix 5 \
   --report-dir /mnt/c/Backup_Go7/merge-reports \
   --dry-run
 ```
 
-The implementation:
+### Building the prefix tree in memory
 
-- processes direct author folders under `Author/`;
-- gives each author its own **folder under the deepest matching prefix**, so
-  authors that share a prefix never mix their books:
-  `Абби Линн/Magic The Gathering/…` lands at
-  `А/Аб/Абби Линн/Magic The Gathering/…`;
-- copies every file of an author **recursively by default**: subfolders are
-  book series and keep their relative layout inside the author folder;
-- `--no-recursive` copies direct files only and records subfolders as skipped;
-- **never copies Windows metadata** (`desktop.ini`, `Thumbs.db` by default,
-  configurable via `MERGE_SKIP_NAMES`);
-- empty subfolders are never created;
-- copies files rather than moving or linking them;
-- supports mixed book formats without unpacking archives;
-- preserves source filenames and the series layout;
-- leaves the source archive unchanged;
-- copies into the deepest valid prefix directory;
-- never overwrites without permission (policy `never` by default);
-- remains safe to repeat (re-runs see author folders already in the skeleton).
+The author list (`--input-file`) is normalized (CRLF → LF, blank lines
+dropped) and sorted with `LC_ALL=C` (byte order), then walked with the same
+contiguous-range algorithm as the shell builder:
 
-Multi-author expansion is deliberately out of scope for this first merge
-operation. It can be added later when the metadata and identity rules are
-confirmed.
+- a prefix becomes a directory level only when at least `--min-authors`
+  authors share it (default 10);
+- prefixes are capped at `--max-prefix` characters (default 5);
+- a space is a word boundary and never becomes a directory level;
+- apostrophes become a caret in directory names (`О'Брайен` → `О/О^`),
+  matching what the shell builder emits.
+
+The in-memory index records **every valid prefix** (SQL-mode semantics), not
+just the deepest ones, because resolution needs ancestors: author
+`Абби Линн` resolves to `А/Аб`, an ancestor of the deepest emitted directory.
+
+### Resolution and copy
+
+Each top-level author folder is trimmed and resolved to the **longest valid
+prefix** that is a byte-prefix of the author name (case-sensitive, exact for
+UTF-8). The author becomes its own folder under that prefix; authors sharing
+a prefix never mix their books.
+
+```text
+Source author:  Толстой Лев Николаевич
+Destination:   BooksInput_<ts>/Т/То/Тол/Толс/Толстой Лев Николаевич/
+```
+
+Behavior:
+
+- files are copied **recursively by default** — subfolders are book series
+  and keep their relative layout (`Серия/том1.fb2` lands inside the author
+  folder); `--no-recursive` copies direct files only and records subfolders
+  as skipped;
+- **Windows metadata is never copied** (`desktop.ini`, `Thumbs.db` by
+  default, configurable via `MERGE_SKIP_NAMES`);
+- empty subfolders are never created — **the staging tree is pruned by
+  construction**: only directories that receive a copied file exist, so no
+  prune pass is needed;
+- existing destination files are handled per the overwrite policy
+  (`never` default / `ask` / `force`), and a file written twice from the same
+  source is always skipped as a duplicate;
+- if an author matches no valid prefix, it is reported as **unmatched** and
+  nothing is copied;
+- the source archive is never modified;
+- an existing `BooksInput_<ts>` staging name is not an error: it is treated
+  like the old persistent skeleton (the overwrite policy applies), so
+  deliberate re-runs and incremental repopulation work.
+
+If the matched prefix is already the author's own folder (from a previous
+run), the author is not appended twice.
+
+## Step 2: finalize into Books with rsync
+
+```bash
+# Dry run first (rows are would-copy / would-keep)
+./bin/merge_skeleton_into_books.sh \
+  --output-root /mnt/c/Backup_Go7 \
+  --target /mnt/c/Backup_Go7/Books \
+  --dry-run
+
+# Real sync (under the hood):
+#   rsync -a --ignore-existing BooksInput_<ts>/  Books/
+./bin/merge_skeleton_into_books.sh \
+  --output-root /mnt/c/Backup_Go7 \
+  --target /mnt/c/Backup_Go7/Books
+```
+
+`bin/merge_skeleton_into_books.sh`:
+
+- with no `--source`, auto-discovers the **newest** `BooksInput_*` folder
+  under `--output-root`;
+- requires the source basename to start with `BooksInput_`;
+- validates paths (dangerous paths, source/target nesting) before doing
+  anything;
+- runs `rsync -a --ignore-existing --itemize-changes` with
+  `--exclude=desktop.ini --exclude=Thumbs.db` belt-and-braces; a trailing
+  slash on the source copies the *contents*, not the folder itself;
+- writes a per-file TSV report
+  (`merge_skeleton_into_books_<ts>.tsv`) with status `copied` /
+  `would-copy` (dry run) and `kept-existing` / `would-keep` — files already
+  present in the library are never overwritten (the destination wins);
+- retains the staging folder intact;
+- requires rsync on PATH (WSL and Ubuntu CI runners ship it).
 
 ## Duplicate, collision, and overwrite policy
 
@@ -133,12 +174,12 @@ Duplicate detection uses destination filename matching:
 - Record every skipped duplicate.
 
 Filename-only comparison is not content-safe: unrelated books may share a
-filename. A future improvement should use size plus SHA-256 verification before
-considering files identical.
+filename. A future improvement should use size plus SHA-256 verification
+before considering files identical.
 
 ## Reports and manifest
 
-The merge operation should write a report directory containing:
+The merge operation writes a report directory containing:
 
 ```text
 merge-manifest.tsv
@@ -149,79 +190,73 @@ duplicates.tsv
 skipped-files.tsv
 ```
 
-The manifest should record at least:
+The manifest records at least:
 
 ```text
 processed_at  source_author  source_file  destination_file  status  reason
 ```
 
-Possible statuses include `copied`, `duplicate-name`, `collision`,
-`unmatched-author`, `ambiguous-author`, and `skipped`.
+Possible statuses include `copied`, `would-copy` (dry run), `overwritten`,
+`duplicate`, `duplicate-name`, `collision`, `unmatched-author`,
+`ambiguous-author`, and `skipped` (failed copies, subfolders under
+`--no-recursive`, or Windows metadata matched by the skip list).
+
+The finalize step writes its own single report
+(`merge_skeleton_into_books_<ts>.tsv`) with statuses `copied`, `would-copy`,
+`kept-existing`, `would-keep`.
 
 ## Configuration
 
-`config/merge_books.conf` supplies defaults for the source, skeleton, report
-directory, recursive behavior, and overwrite policy. Every setting resolves
-**flag > environment variable > config file > built-in default**. `--dry-run`
-is deliberately not configurable — it stays a command-line safety gate.
+`config/merge_books.conf` supplies defaults for the input file, source,
+output root, report directory, recursion, overwrite policy, tree knobs
+(`MERGE_MIN_AUTHORS`, `MERGE_MAX_PREFIX`), and skip list. Every setting
+resolves **flag > environment variable > config file > built-in default**.
+`--dry-run` is deliberately not configurable — it stays a command-line safety
+gate.
+
+`config/merge_skeleton_into_books.conf` supplies defaults for the finalize
+wrapper (`OUTPUT_DIR` discovery root, `TARGET_DIR`, `REPORT_DIR`); the same
+resolution order applies.
 
 ## Safety and rollout
 
 Run the following sequence:
 
-1. Generate the skeleton in a temporary directory.
-2. Inspect its prefix paths and confirm the minimum-author policy.
-3. Run the merge tool with `--dry-run`.
-4. Review unmatched authors, ambiguous matches, collisions, and skipped files.
-5. Run the real copy only after the dry-run report is acceptable.
-6. Preserve the manifest for audit and future resume operations.
+1. Review the author list (`data/fixtures/authors_list_from_db.txt`) and the
+   tree knobs (`--min-authors`, `--max-prefix`).
+2. Run the merge tool with `--dry-run` and review unmatched authors,
+   collisions, duplicates, and skipped files — dry run creates nothing.
+3. Run the real merge; inspect the pruned staging tree
+   (`/mnt/c/Backup_Go7/BooksInput_<ts>`).
+4. Run the finalize step with `--dry-run` and review the would-copy /
+   would-keep rows.
+5. Run the real finalize; the destination wins, so nothing in `Books` is
+   ever overwritten.
 
-`--overwrite=force` is implemented and reviewed, but treat it as the exception:
-`never` is the safe default and `ask` prompts per file.
+`--overwrite=force` is implemented and reviewed, but treat it as the
+exception: `never` is the safe default and `ask` prompts per file.
 
 ## Implementation
 
 The whole pipeline below is implemented (see `CHANGELOG.md`):
 
 ```text
-bin/build_shell_nested_authors.sh        build the prefix skeleton (6.6.8)
-bin/merge_books_into_skeleton.sh         fill it from the archive (v0.1.2)
-lib/merge_books_functions.sh             shared functions for the merge tool
-bin/merge_skeleton_into_books.sh         finalize into the Books library (v0.1.0)
+bin/merge_books_into_skeleton.sh         merge the archive into an in-memory
+                                         prefix hierarchy -> BooksInput_<ts> (0.2.0)
+lib/merge_books_functions.sh             shared functions for the merge tool (0.2.0)
+bin/merge_skeleton_into_books.sh         rsync finalize into Books (0.2.0)
+bin/build_shell_nested_authors.sh        still available: mkdir -p scripts /
+                                         SQL nested-set table (6.6.10)
 ```
 
-The merge suite covers normal authors, Cyrillic names, duplicate filenames,
-collisions, unmatched authors, ambiguous matches, recursive series copy,
-`--no-recursive`, overwrite policies, skip list (desktop.ini / Thumbs.db),
-config-file loading, mixed extensions, dry-run behavior, and repeated
-execution (45/45 checks).  The finalize suite is 21/21 checks.
+The merge suite covers the in-memory tree build, pruned staging output,
+unmatched authors, duplicate filenames, collisions, recursive series copy,
+`--no-recursive`, overwrite policies, skip list, config/env/flags precedence,
+CLI, and version headers (44/44 checks). The finalize suite covers rsync
+dry-run and full run, kept-existing conflicts, auto-discovery, CLI, and the
+version header (19/19 checks; skips cleanly when rsync is absent).
 
-Statuses used in the merge reports: `copied`, `would-copy` (dry run),
-`overwritten`, `duplicate-name` (destination name already existed),
-`duplicate` (same source copied twice), `collision` (destination name written
-this run by a different source), `unmatched-author`, `ambiguous-author`, and
-`skipped` (failed copies, subfolders under `--no-recursive`, or Windows
-metadata matched by the skip list).
-
-## Finalize step: merge the populated skeleton into Books
-
-`bin/merge_skeleton_into_books.sh` (v0.1.0) finalizes the populated skeleton
-into the Books library in three safe steps:
-
-1. rename the skeleton to a timestamped staging folder `BooksInput_<ts>`;
-2. remove every empty directory inside the staging folder;
-3. copy the remaining content into `Books`, never overwriting an existing
-   folder or file (the destination wins).
-
-```bash
-./bin/merge_skeleton_into_books.sh \
-  --source /mnt/c/Backup_Go7/Empty_Skeleton \
-  --target /mnt/c/Backup_Go7/Books \
-  --report-dir /mnt/c/Backup_Go7/merge-reports \
-  --dry-run
-```
-
-The staging folder is retained intact (the input is not consumed); only empty
-subdirectories are pruned.  A per-file TSV report records `copied` / `kept-
-existing` (or `would-copy` / `would-keep` in a dry run).  `--no-rename` and
-`--no-prune` are escape hatches.  `--dry-run` is always run first.
+Because the prefix tree is generated from the author list itself, each prefix
+has exactly one path — the ambiguity case (several distinct skeleton paths
+sharing the longest prefix) can no longer arise from a hand-built skeleton;
+the code path is kept defensively.
