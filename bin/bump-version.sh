@@ -38,6 +38,7 @@
 #       merge_books_into_skeleton     (0.1.x, bin + lib twin)
 #       merge_skeleton_into_books     (0.1.x)
 #       utf8_prefix_generator         (1.x, two-part versions only)
+#       export_authors_from_db        (1.0.x)
 #
 #   <new_version> must be strictly greater than the current version and match
 #   the tool's version shape (X.Y.Z for shell tools, X.Y for the AWK tool).
@@ -154,6 +155,7 @@ usage() {
     echo "  merge_books_into_skeleton     (0.1.x, bin + lib twin)"
     echo "  merge_skeleton_into_books     (0.1.x)"
     echo "  utf8_prefix_generator         (1.x, two-part versions only)"
+    echo "  export_authors_from_db        (1.0.x)"
     echo ""
     echo "Example: $0 build_shell_nested_authors 6.6.11"
     exit 1
@@ -206,6 +208,10 @@ main() {
             primary="lib/utf8_prefix_generator.awk"
             marker="lib/utf8_prefix_generator.awk"
             shape="x.y"
+            ;;
+        export_authors_from_db)
+            primary="bin/export_authors_from_db.sh"
+            marker="bin/export_authors_from_db.sh"
             ;;
         *)
             echo "Error: unknown tool '$tool'." >&2

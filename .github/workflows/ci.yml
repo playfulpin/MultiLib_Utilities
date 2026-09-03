@@ -30,10 +30,11 @@ jobs:
       - name: Version sync check
         run: bash tests/test_version_sync.sh
 
-      - name: Merge suites (run anywhere)
+      - name: Unit suites (run anywhere)
         run: |
           bash tests/test_merge_books_into_skeleton.sh
           bash tests/test_merge_skeleton_into_books.sh
+          bash tests/test_export_authors_from_db.sh
 
       - name: UTF-8 suites (WSL-style, multibyte bash)
         run: |

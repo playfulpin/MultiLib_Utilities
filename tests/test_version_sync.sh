@@ -149,6 +149,9 @@ check_tool merge_skeleton_into_books \
 check_tool utf8_prefix_generator \
     "lib/utf8_prefix_generator.awk" "" "lib/utf8_prefix_generator.awk"
 
+check_tool export_authors_from_db \
+    "bin/export_authors_from_db.sh" "" "bin/export_authors_from_db.sh"
+
 # --- summary --------------------------------------------------------------------
 echo
 echo "=============================="

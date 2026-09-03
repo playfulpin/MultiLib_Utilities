@@ -16,6 +16,7 @@ Books library.
 - `lib/utf8_prefix_generator.awk` **1.1** — original AWK generator (parity reference)
 - `bin/merge_books_into_skeleton.sh` **0.2.0** — merge a legacy archive into an in-memory author-prefix hierarchy (pruned, timestamped `BooksInput_<ts>` staging; no on-disk skeleton)
 - `bin/merge_skeleton_into_books.sh` **0.2.3** — finalize a `BooksInput_*` staging tree into the Books library with rsync (destination wins, live `pv -l` item-count progress bar with `--info=progress2` fallback, empty-dir prune after merge)
+- `bin/export_authors_from_db.sh` **1.0.0** — regenerate the flat author list (`data/fixtures/authors_list_from_db.txt`) straight from the MariaDB catalog by running a query file (default `data/sql/qry_authors_4_and_5_all.sql`); uses the same `MYSQL_*` connection contract as BookTracker-import
 
 ## Highlights
 

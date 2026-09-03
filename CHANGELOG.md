@@ -7,6 +7,57 @@ All notable changes to the author-toolchain scripts in this repository:
 `bin/merge_books_into_skeleton.sh`, and
 `bin/merge_skeleton_into_books.sh`.
 
+## [Unreleased]
+
+- **The author list is now DB-driven.**  New `bin/export_authors_from_db.sh`
+  v1.0.0 regenerates `data/fixtures/authors_list_from_db.txt` straight from
+  the MariaDB catalog by running a query file (default
+  `data/sql/qry_authors_4_and_5_all.sql`, a new committed query selecting
+  authors with at least one book rated 4/5 and enough books overall).
+  Connection settings reuse the BookTracker-import `MYSQL_*` contract
+  (defaults `mysql` / `127.0.0.1` / `3306` / `root` / empty / `flibusta`;
+  password via `MYSQL_PWD` only).  The session charset is pinned with
+  `SET NAMES utf8` via `--init-command`, because the server ignores the
+  client handshake charset (`skip-character-set-client-handshake`) and would
+  otherwise transcode results to cp1251.  Rows are normalized (BOM/CRLF,
+  trailing whitespace, blank lines, literal `NULL` rows) before the atomic
+  write; `--dry-run` counts without writing; `-o -` streams to stdout.
+  Registered in the version-sync machinery (header = README table row =
+  RELEASE_NOTES shipped line = bump-version registry).
+- **Fixture refreshed from the live catalog**: 6,088 -> 13,396 authors
+  (2026-09-03 query run).  The old snapshot was produced by the
+  genre-restricted `data/sql/qry_authors_4_and_5_love_hard.sql` (books in
+  the single `Порно` genre rated 4/5, no book-count thresholds) and an
+  untrimmed CONCAT; that query is now annotated for provenance and
+  superseded by `qry_authors_4_and_5_all.sql` (all genres, `TotalCount
+  >= 10` / `NormalCount > 6`).  Membership diff (whitespace-trimmed):
+  6,069 of the 6,089 old unique names are kept, 20 genuinely dropped,
+  ~7,327 genuinely added; ~3,150 of the raw "losses" were just
+  trailing-space artifacts of the old CONCAT.  All toolchain suites green
+  on the new list.
+- **Prefix-table roots grow 24 -> 33 first characters.**  Regenerated
+  from the new fixture, `bin/build_prefix_table.sh` emits 17,670 rows
+  (old list: 10,151, matching the historical record) with no root present
+  only in the old list.  New root classes, verified with real authors:
+  digit `1` ("100 Рожева Татьяна"), Latin `H Q d e l p` ("Harvard
+  Business Review (HBR)", "Qrasik", "de Budyon Michael A.",
+  "estimata", "linnea", "pavel_7_8"), lowercase Cyrillic `б к ф`
+  ("бен-Маймон Моше", "клевчук", "фон Беренготт Лючия"), and CJK
+  `我` ("我吃西红柿 .").  Existing roots grow too (Ё 1->3, Й 5->14,
+  Э 71->172); Ъ/Ы/Ь remain impossible initials (0 in both lists).
+- **New mock suite `tests/test_export_authors_from_db.sh` (14 checks, runs
+  anywhere, no DB needed)**: asserts the connection argv (password never on
+  the command line, `SET NAMES` init-command), row normalization, NULL-row
+  drop, dry-run/stderr/stdout modes, and failure handling.  CI runs it.
+- **Byte-order detector fix in two suites.**  `byte_order_violations()` used
+  a bare gawk `>=`, which coerces numeric-looking prefixes ("100", "100 ")
+  to numbers and both false-flagged valid tables and could mask real
+  violations.  The comparisons are forced back to bytes with a `""`
+  concatenation; a numeric-prefix regression check was added to the prefix
+  suite's invariants.  Exposed by the refreshed list (author
+  "100 Рожева Татьяна"); `LC_ALL=C sort -c` and the integrity checker both
+  confirm the generator output was always correctly byte-ordered.
+
 ## [v1.1.0] - 2026-09-03
 
 **Library-catalog refactor release.**  The merge pipeline no longer depends

@@ -4,7 +4,8 @@
 # tests/test_e2e_pipeline.sh
 #
 # End-to-end regression suite for the toolchain's three-stage pipeline run on
-# the REAL author list (data/fixtures/authors_list_from_db.txt, 6,088 names):
+# the REAL author list (data/fixtures/authors_list_from_db.txt, regenerated
+# from the MariaDB catalog by bin/export_authors_from_db.sh):
 #
 #     bin/build_prefix_table.sh  ->  bin/prefix_table_integrity.sh  ->  bin/prefix_tree_visualizer.sh
 #     (generate)                  (validate)                    (render)
@@ -127,7 +128,9 @@ fi
 
 # Byte order is the generator's core contract (LC_ALL=C, pre-order trie walk).
 # The historical AWK table carried 6,483 byte-order warnings; zero is required.
-n=$(LC_ALL=C awk -F '\t' 'NR>1 && prev >= $1 {bad++} {prev=$1} END{print bad+0}' "$TABLE")
+# gawk types numeric-looking prefixes as numbers ("100" vs "100 "), so the
+# comparison is forced back to bytes with a "" concatenation.
+n=$(LC_ALL=C awk -F '\t' 'NR>1 && (prev "") >= ($1 "") {bad++} {prev=$1} END{print bad+0}' "$TABLE")
 if (( n == 0 )); then
     report "generate_byte_order" ok
 else

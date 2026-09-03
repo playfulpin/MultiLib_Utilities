@@ -5,6 +5,27 @@
 -- |  in the specified genre 
 -- |
 -- +-----------------------------------------------
+--
+-- HISTORY / PROVENANCE
+--
+-- This is the ORIGINAL author-list query.  Run against the catalog state
+-- before the 2026-09-03 reload, its output was committed as the 6,088-name
+-- snapshot data/fixtures/authors_list_from_db.txt and fed the author
+-- skeleton / prefix toolchain from 2026-08-13 until 2026-09-03.
+--
+-- Two properties made it a poor fit for a library-wide author skeleton:
+--
+--   * Genre-restricted: it only matches books in the single genre whose
+--     genrenamerus is 'Порно' (the WHERE subquery), so authors whose
+--     4/5-rated books carry any other genre never appeared.
+--   * Raw CONCAT output: FirstName/MiddleName were concatenated without
+--     trimming, so emitted names carried trailing spaces (snapshot rows
+--     looked like 'Ande  ').
+--
+-- SUPERSEDED on 2026-09-03 by qry_authors_4_and_5_all.sql (all genres,
+-- plus TotalCount >= 10 / NormalCount > 6 thresholds), which regenerated
+-- the fixture at 13,396 names.  Kept for provenance only; do not reuse
+-- for the author list.
 SELECT DISTINCT
    --     a_name.authorid    AS Authorid  ,
    --     a_name.LastName    AS LastName  ,

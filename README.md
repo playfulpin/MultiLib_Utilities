@@ -48,6 +48,32 @@ in the byte-sorted list (`end` is inclusive, so `count == end - start + 1`).
   checks.
 - **`rsync`** — required by the finalize step
   (`bin/merge_skeleton_into_books.sh`). WSL and Ubuntu CI runners ship it.
+- **A `mysql`/`mariadb` client (optional)** — only needed to regenerate the
+  author list with `bin/export_authors_from_db.sh`. The prefix/merge tools
+  themselves never touch the database.
+
+## The author list
+
+Every tool above consumes the flat author list at
+`data/fixtures/authors_list_from_db.txt` (one canonical name per line). It is
+no longer a hand-maintained snapshot: regenerate it straight from the MariaDB
+catalog whenever the library changes.
+
+```bash
+./bin/export_authors_from_db.sh                  # -> data/fixtures/authors_list_from_db.txt
+./bin/export_authors_from_db.sh --dry-run        # count the authors, write nothing
+./bin/export_authors_from_db.sh -q MY_QUERY.sql -o -   # run a different query to stdout
+```
+
+The default query (`data/sql/qry_authors_4_and_5_all.sql`) selects authors
+with at least one book rated 4 or 5 and enough books overall. Connection
+settings mirror the BookTracker-import contract (`MYSQL_CLIENT`, `MYSQL_HOST`,
+`MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`,
+`MYSQL_EXTRA_ARGS`; defaults `mysql`, `127.0.0.1`, `3306`, `root`, empty,
+`flibusta`); the password travels via `MYSQL_PWD` only and never appears on
+the command line, and the session charset is pinned to UTF-8 regardless of
+the server's handshake default. MariaDB must already be running — the
+exporter only reads from it.
 
 ## Tools
 
@@ -300,6 +326,7 @@ Releases are tagged with a tool-prefixed name:
 | `bin/build_shell_nested_authors.sh` | 6.6.10 | `v6.6.10` |
 | `bin/merge_books_into_skeleton.sh` | 0.2.0 | `merge_books_into_skeleton-0.2.0` |
 | `bin/merge_skeleton_into_books.sh` | 0.2.3 | `merge_skeleton_into_books-0.2.3` |
+| `bin/export_authors_from_db.sh` | 1.0.0 | `export_authors_from_db-1.0.0` |
 | `lib/utf8_prefix_generator.awk` | 1.1 | `utf8_prefix_generator-1.1` |
 
 `v2.8.1` and `v6.6.8` predate the tool-prefixed convention.
@@ -339,8 +366,9 @@ tests/                          fixtures and golden files
 
 docs/BOOK_LIBRARY_MERGE_PLAN.md        skeleton + merge design document
 
-data/fixtures/authors_list_from_db.txt        real author list (6,088 names)
+data/fixtures/authors_list_from_db.txt        flat author list (regenerated from the DB by bin/export_authors_from_db.sh)
 data/sql/CTE_table.sql / data/sql/populate_tree.sql   nested-set dictionary table (schema + data)
+data/sql/qry_authors_4_and_5_all.sql           default author-list query (rated-4/5 authors) for the exporter
 
 CHANGELOG.md                    full release history
 _Old_Stuff/ , _Save_Stuff/      archived/scratch files (git-ignored)
