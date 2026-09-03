@@ -334,10 +334,15 @@ Releases are tagged with a tool-prefixed name:
 **`v1.0.0` was the first production release** of the toolchain as a whole,
 cut 2026-09-01 on top of the 6.6.10 tool work; it superseded the individual
 tool tags as the repository-wide release marker.  **`v1.1.0`, cut 2026-09-03
-on top of the library-catalog refactor, is the current production release**:
-the merge pipeline runs without an on-disk skeleton (in-memory
-`BooksInput_<ts>` staging, rsync finalize with a live `pv -l` progress bar)
-and CI runs the full suite set on every push and pull request.
+on top of the library-catalog refactor**, moved the merge pipeline to run
+without an on-disk skeleton (in-memory `BooksInput_<ts>` staging, rsync
+finalize with a live `pv -l` progress bar) and added CI on every push and
+pull request.  **`v1.2.0`, cut 2026-09-03, is the current production
+release**: the author list is DB-driven — `bin/export_authors_from_db.sh`
+regenerates `data/fixtures/authors_list_from_db.txt` from a query against
+the MariaDB catalog and manages the server lifecycle itself (auto-start
+when down, graceful stop on exit), and the working fixture is a
+genre-scoped 5,707-author Фантастика list, regenerable at any time.
 
 To cut a release: bump the header version, run the WSL test suites (see
 [Testing](#testing)), commit, then tag with the tool-prefixed name. See

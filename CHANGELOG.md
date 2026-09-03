@@ -7,7 +7,17 @@ All notable changes to the author-toolchain scripts in this repository:
 `bin/merge_books_into_skeleton.sh`, and
 `bin/merge_skeleton_into_books.sh`.
 
-## [Unreleased]
+## [v1.2.0] - 2026-09-03
+
+**DB-driven author-list release.**  New `bin/export_authors_from_db.sh`
+regenerates the flat author fixture straight from the MariaDB catalog by
+running a query file, and manages the MariaDB lifecycle itself — auto-start
+when down, graceful stop on exit, already-running servers left untouched —
+so no manual server handling is needed.  The working fixture is now a
+genre-scoped list (5,707 Фантастика authors, 2026-09-03) and stays fully
+regenerable; the previous 6,088-name snapshot traced back to a
+single-genre legacy query, now annotated for provenance.  All 9 suites
+(190 checks) green under WSL.
 
 - **The author list is now DB-driven.**  New `bin/export_authors_from_db.sh`
   v1.0.0 regenerates `data/fixtures/authors_list_from_db.txt` straight from
