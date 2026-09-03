@@ -7,6 +7,12 @@ All notable changes to the author-toolchain scripts in this repository:
 `bin/merge_books_into_skeleton.sh`, and
 `bin/merge_skeleton_into_books.sh`.
 
+## [Unreleased]
+
+- **CI: bump `actions/checkout` v4 -> v5.**  GitHub is deprecating
+  Node.js 20, which forced the v4 action onto Node.js 24 with an
+  annotation warning; v5 runs on a supported runtime and silences it.
+
 ## [v1.2.0] - 2026-09-03
 
 **DB-driven author-list release.**  New `bin/export_authors_from_db.sh`
