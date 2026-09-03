@@ -304,9 +304,13 @@ Releases are tagged with a tool-prefixed name:
 
 `v2.8.1` and `v6.6.8` predate the tool-prefixed convention.
 
-**`v1.0.0` is the first production release** of the toolchain as a whole,
-cut 2026-09-01 on top of the 6.6.10 tool work; it supersedes the individual
-tool tags as the repository-wide release marker.
+**`v1.0.0` was the first production release** of the toolchain as a whole,
+cut 2026-09-01 on top of the 6.6.10 tool work; it superseded the individual
+tool tags as the repository-wide release marker.  **`v1.1.0`, cut 2026-09-03
+on top of the library-catalog refactor, is the current production release**:
+the merge pipeline runs without an on-disk skeleton (in-memory
+`BooksInput_<ts>` staging, rsync finalize with a live `pv -l` progress bar)
+and CI runs the full suite set on every push and pull request.
 
 To cut a release: bump the header version, run the WSL test suites (see
 [Testing](#testing)), commit, then tag with the tool-prefixed name. See

@@ -7,7 +7,16 @@ All notable changes to the author-toolchain scripts in this repository:
 `bin/merge_books_into_skeleton.sh`, and
 `bin/merge_skeleton_into_books.sh`.
 
-## [Unreleased] - 2026-09-01 (library-catalog refactor)
+## [v1.1.0] - 2026-09-03
+
+**Library-catalog refactor release.**  The merge pipeline no longer depends
+on an on-disk `Empty_Skeleton` tree: `bin/merge_books_into_skeleton.sh`
+builds the author-prefix hierarchy in memory and writes straight into a
+timestamped, pruned `BooksInput_<ts>` staging tree, and
+`bin/merge_skeleton_into_books.sh` finalizes it with rsync (destination
+wins, live `pv -l` progress bar).  Also ships the GitHub Actions CI +
+version-automation workflow; the merge suites now run on the Linux CI
+runner.  Suites green under WSL and CI.
 
 - **Refactor branch `refactor/update-library-catalog`: the merge pipeline no
   longer uses the `Empty_Skeleton` folder.**  `bin/build_shell_nested_authors.sh`
@@ -85,8 +94,6 @@ All notable changes to the author-toolchain scripts in this repository:
   table, CI blurb, and repository layout updated; RELEASE_NOTES shipped
   tools and merge-tool prose updated.  Stale `bin/merge_skeleton_into_books.sh.bak`
   and `.01.bak` files removed.
-
-## [Unreleased] - 2026-09-01 (CI & version automation)
 
 - **New development workflow: GitHub Actions CI + version automation.**
   - `.github/workflows/ci.yml` runs on every push/PR: shell syntax check
