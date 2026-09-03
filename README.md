@@ -17,13 +17,16 @@ bin/build_prefix_table.sh ──> bin/prefix_table_integrity.sh ──> bin/pref
    (generate table)          (validate table)              (render tree)
 
 bin/build_shell_nested_authors.sh
-   (build a nested directory tree directly from names)
+   (build a nested directory tree from names: mkdir -p commands or SQL)
 
 bin/merge_books_into_skeleton.sh
-   (copy a legacy book archive into the skeleton, safely)
+   (merge a legacy archive into an in-memory author-prefix hierarchy,
+    emitting a pruned, timestamped BooksInput_<ts> staging tree -- no
+    on-disk skeleton is built or consumed)
 
 bin/merge_skeleton_into_books.sh
-   (rename, prune empties, and finalize the skeleton into the Books library)
+   (rsync the BooksInput_* staging tree into the Books library,
+    destination wins -- the old rename/prune/copy loop is gone)
 ```
 
 The canonical prefix table format is TAB-separated with four columns:
@@ -43,6 +46,8 @@ in the byte-sorted list (`end` is inclusive, so `count == end - start + 1`).
   **WSL** (`wsl.exe bash …`).
 - **`gawk`** — required by `bin/prefix_tree_visualizer.sh` and by the AWK parity
   checks.
+- **`rsync`** — required by the finalize step
+  (`bin/merge_skeleton_into_books.sh`). WSL and Ubuntu CI runners ship it.
 
 ## Tools
 
@@ -115,73 +120,99 @@ Options: `-m/--min-authors` (default 10), `-x/--max-prefix` (default 5),
 
 ### `bin/merge_books_into_skeleton.sh`
 
-Copies the files of every top-level author folder in a legacy archive into a
-directory named after the author, placed under the **deepest valid prefix**
-of a pre-built skeleton:
+Builds the author prefix tree **in memory** from a flat author list (the same
+range-walk algorithm as `bin/build_shell_nested_authors.sh`: a prefix becomes
+a directory only when at least `--min-authors` authors share it, capped at
+`--max-prefix` characters), then copies the files of every top-level author
+folder in a legacy archive into a directory named after the author, placed
+under the **deepest valid prefix**:
 
 ```text
 source:  Абби Линн/Magic The Gathering/0Мироходец.zip
 dest:    А/Аб/Абби Линн/Magic The Gathering/0Мироходец.zip
 ```
 
+Output goes straight into a **timestamped, pruned staging tree** —
+`<output-root>/BooksInput_<timestamp>/` — with no `Empty_Skeleton` folder
+built or consumed. Only directories that receive a copied file are created,
+so the tree is pruned by construction.
+
 Book-series subfolders are copied recursively by default, preserving their
 relative layout. Windows metadata files (`desktop.ini`, `Thumbs.db` by
-default) are never copied. The skeleton itself is never modified; existing
-destination files are never overwritten unless the user allows it. See
+default) are never copied. Existing destination files are never overwritten
+unless the user allows it. The source archive is never modified. See
 `docs/BOOK_LIBRARY_MERGE_PLAN.md` for the full design.
 
 ```bash
 ./bin/merge_books_into_skeleton.sh \
-    --source /mnt/c/Backup_Go7/ToLoad/Author \
-    --skeleton /mnt/c/Backup_Go7/Library \
+    --source /mnt/c/Backup_Go7/ToLoad \
+    --input-file data/fixtures/authors_list_from_db.txt \
+    --output-root /mnt/c/Backup_Go7 \
     --report-dir /mnt/c/Backup_Go7/merge-reports \
     --dry-run
 ```
 
-Options: `-s/--source`, `-k/--skeleton`, `-r/--report-dir` (default
-`$PWD/merge-reports`), `--config FILE`, `--recursive` / `--no-recursive`,
+Options: `-s/--source`, `-i/--input-file`, `-o/--output-root`,
+`--timestamp STAMP`, `-m/--min-authors` (default 10), `-x/--max-prefix`
+(default 5), `-r/--report-dir` (default `$PWD/merge-reports`),
+`--config FILE`, `--recursive` / `--no-recursive`,
 `--overwrite never|ask|force`, `--dry-run` (resolve and report, copy
 nothing), `-v/--version`, `-h/--help`.
 
 Every setting resolves **flag > environment variable > config file > built-in
-default**. The optional `config/merge_books.conf` holds the source, skeleton,
-report directory, recursive behavior, overwrite policy, and the skip list
-(`MERGE_SKIP_NAMES`); the same keys work as environment variables
-(`MERGE_SOURCE_DIR`, `MERGE_SKELETON_ROOT`, ...). `--dry-run` is
-intentionally not configurable.
+default**. The optional `config/merge_books.conf` holds the input file,
+source, output root, report directory, recursive behavior, overwrite policy,
+tree knobs, and the skip list (`MERGE_SKIP_NAMES`); the same keys work as
+environment variables (`MERGE_INPUT_FILE`, `MERGE_SOURCE_DIR`,
+`MERGE_OUTPUT_DIR`, `MERGE_MIN_AUTHORS`, `MERGE_MAX_PREFIX`, ...).
+`--dry-run` is intentionally not configurable.
 
 Reports are written as TSV files: `merge-manifest.tsv`,
 `unmatched-authors.tsv`, `ambiguous-authors.tsv`, `collisions.tsv`,
 `duplicates.tsv`, and `skipped-files.tsv`. Always run `--dry-run` first and
 review the reports before a real copy.
 
-Unlike the UTF-8-slicing tools, this script compares prefixes byte-wise
-(exact for UTF-8), so it runs under both Cygwin/MSYS bash and WSL.
+The prefix tree slices UTF-8 prefixes character by character, so — like the
+builder — this script requires a multibyte-capable shell (WSL).
 
 ### `bin/merge_skeleton_into_books.sh`
 
-The finalize step: after the merge tool has populated the skeleton, turn it
-into the Books library in three safe steps:
-
-1. rename the skeleton to a timestamped staging folder `BooksInput_<ts>`;
-2. remove every empty directory inside it;
-3. copy the remaining content into `Books`, **never overwriting** an existing
-   folder or file (the destination wins).
+The finalize step: rsync a `BooksInput_<ts>` staging tree (produced by
+`bin/merge_books_into_skeleton.sh`, already named and already pruned) into
+the Books library. The rename and prune steps no longer exist; rsync does
+the copy, resumably and safely, with a **live progress bar** on the
+terminal:
 
 ```bash
-# Normal full run
+item_count=$(find <BooksInput_ts> -mindepth 1 -type f -o -type d | wc -l)
+rsync -av --ignore-existing <BooksInput_ts>/  <Books>/ | pv -l -s "$item_count" > /dev/null
+```
+
+The wrapper validates the paths, requires the source to be a `BooksInput_*`
+folder, and writes a per-file TSV report (`copied` / `would-copy` /
+`kept-existing` / `would-keep`). The destination wins: a file already
+present in the library is never overwritten. The progress bar does not
+interfere with the report: the per-file itemize lines are captured via
+rsync's `--log-file` instead of stdout. When `pv` is not installed the run
+falls back to rsync's native `--info=progress2`. `pv -l` counts listing
+lines (one per transferred file and directory), so the count is files+dirs
+and a grep filter strips rsync's header/blank/summary lines before pv so
+the bar lands at exactly 100%; rsync streams payloads over its own
+channel, so the pipe never carries the bytes themselves.
+
+After a successful merge the library is **pruned of empty directories**
+(`find <Books> -depth -mindepth 1 -type d -empty -delete`) as a safety net
+for interrupted runs — `--no-prune` (or `MERGE_PRUNE_EMPTY_DIRS=false`)
+disables it. A dry run only reports how many would be removed.
+
+```bash
+# Dry run first (nothing changes)
 ./bin/merge_skeleton_into_books.sh \
-    --source /mnt/c/Backup_Go7/Empty_Skeleton \
+    --output-root /mnt/c/Backup_Go7 \
     --target /mnt/c/Backup_Go7/Books \
     --dry-run
 
-# Start after prune (explicit)
-./bin/merge_skeleton_into_books.sh \
-    --source /mnt/c/Backup_Go7/BooksInput_20260830-223135 \
-    --target /mnt/c/Backup_Go7/Books \
-    --from-pruned
-
-# Start after prune (auto-detected because name starts with BooksInput_)
+# Explicit source
 ./bin/merge_skeleton_into_books.sh \
     --source /mnt/c/Backup_Go7/BooksInput_20260830-223135 \
     --target /mnt/c/Backup_Go7/Books
@@ -191,25 +222,18 @@ into the Books library in three safe steps:
 
 | Flag | Description |
 |------|-------------|
-| `-s, --source=DIR` | Source skeleton (or already-pruned `BooksInput_<ts>` folder) |
+| `-s, --source=DIR` | Staging tree; when omitted, the **newest** `BooksInput_*` under `--output-root` is auto-discovered |
 | `-t, --target=DIR` | Books library to merge into (destination wins) |
-| `--timestamp=STAMP` | Suffix for the `BooksInput_<stamp>` name (default: `YYYYMMDD-HHMMSS`) |
+| `-o, --output-root=DIR` | Discovery root for `BooksInput_*` (default: `/mnt/c/Backup_Go7`) |
 | `--report-dir=DIR` | Where the TSV report is written (default: `/mnt/c/Backup_Go7/merge-reports`) |
-| `--from-pruned` | Skip rename + prune; source is already a pruned `BooksInput_<ts>` folder |
-| `--no-rename` | Skip the rename step only |
-| `--no-prune` | Leave empty directories in place |
-| `--dry-run` | Show the steps and write the report, change nothing |
+| `--dry-run` | Show what rsync would copy and write the report, change nothing |
+| `--no-prune` | Keep empty directories in the library (pruning is on by default) |
 | `-v, --version` | Print version and exit 0 |
 | `-h, --help` | Show help |
 
-**Starting after the prune step**
-
-Two convenient ways to begin at step 3 (the safe copy):
-
-- `--from-pruned` — explicit request to skip rename + prune.
-- **Auto-detection** — if the basename of `--source` already matches `BooksInput_*`, rename and prune are skipped automatically.
-
-The staging / source folder is always retained intact. A TSV report is written for every run to the fixed directory `/mnt/c/Backup_Go7/merge-reports`.
+The staging folder is always retained intact. Requires **rsync** on PATH.
+Windows metadata (`desktop.ini`, `Thumbs.db`) is excluded belt-and-braces in
+addition to the merge tool's skip list.
 
 ### `lib/utf8_prefix_generator.awk`
 
@@ -232,8 +256,8 @@ wsl.exe bash tests/test_build_shell_nested_authors.sh
 wsl.exe bash tests/test_prefix_tree_visualizer.sh    # renderer: goldens, descent, filters, depth, CLI
 wsl.exe bash tests/test_utf8_prefix_generator.sh     # AWK generator: direct edge-case tests
 wsl.exe bash tests/test_e2e_pipeline.sh              # generator -> validator -> renderer on real data
-bash tests/test_merge_books_into_skeleton.sh         # archive -> skeleton merge (runs anywhere)
-bash tests/test_merge_skeleton_into_books.sh         # skeleton -> Books finalize (runs anywhere)
+wsl.exe bash tests/test_merge_books_into_skeleton.sh # archive -> in-memory prefix hierarchy (WSL)
+wsl.exe bash tests/test_merge_skeleton_into_books.sh # BooksInput_* -> Books rsync finalize (WSL/Linux + rsync)
 bash tests/test_version_sync.sh                      # version locations agree (runs anywhere)
 ```
 
@@ -255,9 +279,9 @@ edits all four in one shot, so use it for every bump:
 GitHub Actions (`.github/workflows/ci.yml`) runs on every push/PR: shell
 syntax check across `bin/` and `lib/`, the version-sync suite, and all eight
 test suites on `ubuntu-latest`. Linux bash is multibyte-capable, so the
-WSL-only constraint of the UTF-8 suites does not block CI; the merge/finalize
-suites run anywhere. This is what caught the two suites that had been broken
-since the layout refactor.
+WSL-only constraint of the UTF-8 suites does not block CI; the finalize suite
+needs rsync (present on the runners) and the rest run anywhere. This is what
+caught the two suites that had been broken since the layout refactor.
 
 ## Releases & versioning
 
@@ -274,8 +298,8 @@ Releases are tagged with a tool-prefixed name:
 | `bin/prefix_table_integrity.sh` | 1.2.1 | `prefix_table_integrity-1.2.1` |
 | `bin/prefix_tree_visualizer.sh` | 2.8.1 | `v2.8.1` |
 | `bin/build_shell_nested_authors.sh` | 6.6.10 | `v6.6.10` |
-| `bin/merge_books_into_skeleton.sh` | 0.1.3 | `merge_books_into_skeleton-0.1.3` |
-| `bin/merge_skeleton_into_books.sh` | 0.1.3 | `merge_skeleton_into_books-0.1.3` |
+| `bin/merge_books_into_skeleton.sh` | 0.2.0 | `merge_books_into_skeleton-0.2.0` |
+| `bin/merge_skeleton_into_books.sh` | 0.2.3 | `merge_skeleton_into_books-0.2.3` |
 | `lib/utf8_prefix_generator.awk` | 1.1 | `utf8_prefix_generator-1.1` |
 
 `v2.8.1` and `v6.6.8` predate the tool-prefixed convention.
@@ -297,12 +321,12 @@ bin/prefix_tree_visualizer.sh       prefix-tree renderer
 bin/build_shell_nested_authors.sh   nested-directory builder
 bin/build_prefix_table.sh           prefix-table generator
 bin/bump-version.sh                 bump one tool's version across header + docs
-bin/merge_books_into_skeleton.sh    archive -> skeleton merge tool
-bin/merge_skeleton_into_books.sh    skeleton -> Books finalize tool
+bin/merge_books_into_skeleton.sh    archive -> in-memory prefix merge tool (BooksInput_<ts> out)
+bin/merge_skeleton_into_books.sh    BooksInput_* -> Books rsync finalize tool
 lib/merge_books_functions.sh        shared functions for the merge tool
 lib/utf8_prefix_generator.awk       original AWK generator (parity reference)
-config/merge_books.conf             defaults for the merge tool (paths + behavior)
-config/merge_skeleton_into_books.conf   defaults for the finalize tool (paths)
+config/merge_books.conf             defaults for the merge tool (input file, paths, tree knobs)
+config/merge_skeleton_into_books.conf   defaults for the finalize tool (paths + discovery root)
 
 tests/test_*.sh                 regression suites (one per tool + e2e + version sync)
 tests/                          fixtures and golden files

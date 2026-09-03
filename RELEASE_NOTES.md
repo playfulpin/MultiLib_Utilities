@@ -14,8 +14,8 @@ Books library.
 - `bin/prefix_table_integrity.sh` **1.2.1** — ultra-strict table validator
 - `bin/prefix_tree_visualizer.sh` **2.8.1** — Unicode tree renderer
 - `lib/utf8_prefix_generator.awk` **1.1** — original AWK generator (parity reference)
-- `bin/merge_books_into_skeleton.sh` **0.1.3** — safely copy a legacy archive into the skeleton
-- `bin/merge_skeleton_into_books.sh` **0.1.3** — finalize the skeleton into the Books library
+- `bin/merge_books_into_skeleton.sh` **0.2.0** — merge a legacy archive into an in-memory author-prefix hierarchy (pruned, timestamped `BooksInput_<ts>` staging; no on-disk skeleton)
+- `bin/merge_skeleton_into_books.sh` **0.2.3** — finalize a `BooksInput_*` staging tree into the Books library with rsync (destination wins, live `pv -l` item-count progress bar with `--info=progress2` fallback, empty-dir prune after merge)
 
 ## Highlights
 
@@ -27,22 +27,23 @@ Books library.
 
 ### Book-library merge tools
 
-- **`merge_books_into_skeleton.sh` (0.1.2)**  
-  Copies every top-level author folder from a legacy archive into the deepest
-  matching prefix of a pre-built skeleton.  Supports recursive series copy,
+- **`merge_books_into_skeleton.sh` (0.2.0)**  
+  Builds the author prefix tree **in memory** from a flat author list (the
+  same range-walk algorithm as `bin/build_shell_nested_authors.sh` —
+  `MERGE_MIN_AUTHORS` pruning, `MERGE_MAX_PREFIX` cap), then copies every
+  top-level author folder from the legacy archive into the deepest valid
+  prefix.  Output lands directly in a timestamped, **pruned** staging tree
+  `<output-root>/BooksInput_<timestamp>` — the `Empty_Skeleton` folder is
+  gone: it is neither built nor consumed.  Supports recursive series copy,
   configurable overwrite policy, skip-list for Windows metadata, dry-run
   reports, and config-file / environment overrides.
 
-- **`merge_skeleton_into_books.sh` (0.1.2)**  
-  Finalizes a populated skeleton into the Books library in three safe steps
-  (rename → prune empty directories → copy without overwriting).  
-  New in 0.1.2:
-  - `--from-pruned` flag to start after the prune step
-  - Auto-detection of `BooksInput_*` source names (skips rename + prune)
-  - Fixed default report directory: `/mnt/c/Backup_Go7/merge-reports`
-  - `set -euo pipefail` restored (hardens rename/prune/copy against partial
-    failures) and CLI parsing simplified to uniform `--flag VALUE` forms
-  - Config and examples aligned on `/mnt/c/Backup_Go7/Books`
+- **`merge_skeleton_into_books.sh` (0.2.0)**  
+  Replaces the rename → prune → copy loop with a thin, validated **rsync**
+  wrapper: `rsync -a --ignore-existing` onto the Books library (destination
+  wins, never overwrites), with auto-discovery of the newest `BooksInput_*`
+  folder, path-safety guards, and a per-file TSV report (`copied` /
+  `would-copy` / `kept-existing` / `would-keep`).
 
 ## Testing
 
@@ -50,9 +51,14 @@ Books library.
   version-sync suite, and all eight test suites on `ubuntu-latest`.
 - Prefix-table family: green under WSL (prefix table, nested-authors,
   visualizer, AWK generator, e2e pipeline) and in CI on Linux bash.
-- Merge tools: suites run under both Cygwin/MSYS bash and WSL.
-  - `test_merge_books_into_skeleton.sh` — full coverage of dry-run, overwrite policies, config/env precedence, etc.
-  - `test_merge_skeleton_into_books.sh` — dry-run, full run, `--no-rename`, `--from-pruned`, auto-detection, CLI, version header.
+- Merge tools: the merge suite slices UTF-8 prefixes, so it runs under WSL
+  (byte-based Git Bash mangles Cyrillic); the finalize suite needs rsync and
+  real POSIX paths (WSL/Linux — MSYS rsync cannot sync Windows-drive paths),
+  and skips cleanly when either is absent.
+  - `test_merge_books_into_skeleton.sh` — in-memory prefix build, pruned
+    staging output, dry-run, overwrite policies, config/env precedence, etc.
+  - `test_merge_skeleton_into_books.sh` — rsync dry-run and full run,
+    keep-existing conflicts, auto-detection, CLI, version header.
 - `test_version_sync.sh` — every tool's version identical across header,
   lib twin, README table, and RELEASE_NOTES; backed by `bin/bump-version.sh`
   which edits all locations in one command.

@@ -3,28 +3,41 @@
 ###############################################################################
 # lib/merge_books_functions.sh
 #
-# Version:       0.1.3
-# Last updated:  2026-08-31 20:24
+# Version:       0.2.0
+# Last updated:  2026-09-01
 #
 # -----------------------------------------------------------------------------
 # PURPOSE
 # -----------------------------------------------------------------------------
-#   Shared functions for bin/merge_books_into_skeleton.sh: copy every file
+#   Shared functions for bin/merge_books_into_skeleton.sh: build the author
+#   prefix hierarchy IN MEMORY from a flat author list, then copy every file
 #   of every top-level author folder in a source archive into the deepest
-#   valid prefix directory of a pre-built author skeleton, without losing
-#   the book-series structure and without overwriting anything the user has
-#   not explicitly allowed.
+#   valid prefix directory for that author, without losing the book-series
+#   structure and without overwriting anything the user has not explicitly
+#   allowed.
 #
-#   The skeleton is the source of truth for destination paths.  It is built
-#   beforehand with bin/build_shell_nested_authors.sh, e.g.:
+#   The prefix tree is computed with the same range-walk algorithm as
+#   bin/build_shell_nested_authors.sh (sorted author list, contiguous prefix
+#   ranges, MINIMUM_AUTHORS pruning, MAX_PREFIX_LENGTH cap), so the result
+#   matches the on-disk skeleton that tool used to emit -- but nothing is
+#   materialized to disk first, and the old Empty_Skeleton staging folder is
+#   gone entirely.
 #
-#       А/Аб/Абр/Абра        <- deepest valid prefix for "Абрамов ..."
-#       Т/То/Толс            <- deepest valid prefix for "Толстой ..."
+#   Output goes straight into a timestamped, pruned staging tree:
 #
-#   An archive author is resolved to the LONGEST skeleton prefix that is a
-#   prefix of the author name.  If two different skeleton paths share that
-#   longest prefix, the author is reported as ambiguous and nothing is
-#   copied.  If no prefix matches, the author is reported as unmatched.
+#       <output-root>/BooksInput_<timestamp>/
+#           А/Аб/Абр/Абра/Абрамов Александр Иванович/...
+#           Т/То/Тол/Толс/Толстой Лев Николаевич/...
+#
+#   Only directories that actually receive a copied file are created, so the
+#   tree is pruned by construction: empty prefix branches never hit disk.
+#   The naming matches what the finalize step's rsync wrapper consumes.
+#
+#   An archive author is resolved to the LONGEST valid prefix that is a
+#   prefix of the author name.  Prefixes come from the author list itself, so
+#   -- unlike a hand-built skeleton -- two distinct paths can never share the
+#   longest prefix; the ambiguity case is kept defensively.  If no prefix
+#   matches, the author is reported as unmatched.
 #
 #   The author itself becomes a DIRECTORY under that prefix, so books never
 #   collide between authors that share a prefix:
@@ -42,50 +55,61 @@
 #   optional config file (config/merge_books.conf, see below), or built-in
 #   defaults:
 #
-#       SOURCE_DIR      top-level author folders (one level only)
-#       SKELETON_ROOT   pre-built prefix skeleton (never modified)
-#       REPORT_DIR      where the TSV reports are written
-#       RECURSIVE       true  => copy book-series subfolders recursively
-#                       false => direct files only (folders are skipped)
-#       OVERWRITE_POLICY  never|ask|force -- what to do when the
-#                       destination file already exists
-#       SKIP_NAMES      space-separated basenames that are never copied
-#                       (Windows metadata; default: desktop.ini Thumbs.db)
+#       INPUT_FILE          flat author list (one canonical name per line);
+#                           the source of truth for the prefix tree
+#       SOURCE_DIR          top-level author folders (one level only)
+#       OUTPUT_ROOT         parent directory; the staging tree is created as
+#                           <OUTPUT_ROOT>/BooksInput_<timestamp>
+#       TIMESTAMP           staging suffix (default: YYYYMMDD-HHMMSS)
+#       MINIMUM_AUTHORS     minimum authors sharing a prefix for it to become
+#                           a directory (default 10)
+#       MAX_PREFIX_LENGTH   deepest prefix level to consider (default 5)
+#       REPORT_DIR          where the TSV reports are written
+#       RECURSIVE           true  => copy book-series subfolders recursively
+#                           false => direct files only (folders are skipped)
+#       OVERWRITE_POLICY    never|ask|force -- what to do when the
+#                           destination file already exists
+#       SKIP_NAMES          space-separated basenames that are never copied
+#                           (Windows metadata; default: desktop.ini Thumbs.db)
 #
 #   Config file keys (sourced as shell assignments):
-#       MERGE_SOURCE_DIR  MERGE_SKELETON_ROOT  MERGE_REPORT_DIR
-#       MERGE_RECURSIVE (ON|OFF)  MERGE_OVERWRITE (never|ask|force)
-#       MERGE_SKIP_NAMES (space-separated basenames)
+#       MERGE_INPUT_FILE  MERGE_SOURCE_DIR  MERGE_OUTPUT_DIR
+#       MERGE_REPORT_DIR  MERGE_RECURSIVE (ON|OFF)
+#       MERGE_OVERWRITE (never|ask|force)  MERGE_MIN_AUTHORS
+#       MERGE_MAX_PREFIX  MERGE_SKIP_NAMES (space-separated basenames)
 #   The same names work as environment variables.  --dry-run is deliberately
 #   NOT configurable: it stays a command-line safety gate.
 #
 # -----------------------------------------------------------------------------
 # ALGORITHM
 # -----------------------------------------------------------------------------
-#   1. COLLECT the skeleton: every directory becomes "rel<TAB>prefix",
-#      where prefix is the LAST path component.  For builder skeletons the
-#      components are incremental prefixes, so the last component IS the
-#      full author prefix the chain represents ("А/Аб/Абр/Абра" -> "Абра").
+#   1. BUILD the prefix index IN MEMORY from INPUT_FILE: CRLF -> LF, drop
+#      blank lines, sort with LC_ALL=C (byte order), then walk contiguous
+#      ranges exactly like the shell-mode walker.  Every valid prefix becomes
+#      one index row "path<TAB>last-component" (the SQL-mode walk, not the
+#      deepest-only mkdir emission -- resolution needs ALL prefixes, e.g.
+#      "Абби Линн" resolves to А/Аб, an ancestor of the deepest dir).
+#      Prefixes containing an apostrophe are stored with a caret ("О/О'"
+#      becomes "О/О^"), matching the on-disk names the shell builder emits,
+#      so byte-prefix resolution reproduces the old pipeline exactly.
 #
-#   2. RESOLVE each archive author folder to the longest skeleton prefix
-#      that is a byte-prefix of the author name.  UTF-8 is self-
-#      synchronizing, so byte-prefix comparison is character-exact in both
-#      byte-based (Cygwin) and multibyte (WSL) bash.  A builder skeleton
-#      always yields exactly one chain per author; several distinct paths
-#      sharing the longest prefix are treated as ambiguous.
+#   2. RESOLVE each archive author folder to the longest valid prefix that
+#      is a byte-prefix of the author name.  UTF-8 is self-synchronizing, so
+#      byte-prefix comparison is character-exact in both byte-based (Cygwin)
+#      and multibyte (WSL) bash.
 #
 #   3. COPY each file (recursively when RECURSIVE is on, so book-series
 #      subfolders keep their relative layout) into
-#      <skeleton>/<rel>/<relative-path> unless the destination already
-#      exists.  Empty subfolders are never created.  Existing destinations
-#      are handled per OVERWRITE_POLICY (never/ask/force); a file written
-#      twice by the same source is always skipped as a duplicate.  Every
-#      outcome is recorded once in the manifest and once in the specialised
-#      report file.
+#      <staging>/<rel>/<author>/<relative-path> unless the destination
+#      already exists.  Empty subfolders are never created, so the staging
+#      tree is pruned by construction.  Existing destinations are handled
+#      per OVERWRITE_POLICY (never/ask/force); a file written twice by the
+#      same source is always skipped as a duplicate.  Every outcome is
+#      recorded once in the manifest and once in the specialised report.
 #
-#   Prefix matching is deliberately case-sensitive, matching the skeleton
+#   Prefix matching is deliberately case-sensitive, matching the tree
 #   builder's LC_ALL=C byte-order semantics: "Толстой" and "толстой" live
-#   in different branches of the skeleton.
+#   in different branches of the hierarchy.
 #
 ###############################################################################
 
@@ -93,7 +117,11 @@ set -euo pipefail
 
 # --- module state (flags, then env, then config, then defaults) -------------
 SOURCE_DIR=""
-SKELETON_ROOT=""
+INPUT_FILE=""
+OUTPUT_ROOT=""
+TIMESTAMP="$(date '+%Y%m%d-%H%M%S')"
+MINIMUM_AUTHORS=10
+MAX_PREFIX_LENGTH=5
 REPORT_DIR=""
 RECURSIVE=true
 OVERWRITE_POLICY="never"
@@ -112,10 +140,12 @@ SKIPPED_FILES=""
 PROCESSED_AT=""
 
 # --- run-time state ----------------------------------------------------------
-declare -a SKEL_DIRS=()        # "rel<TAB>prefix" rows of every skeleton dir
-declare -A DEST_SOURCE=()      # dest file -> source file that wrote it this run
+declare -a SORTED_AUTHORS=()   # normalized, byte-sorted author lines
+declare -a PREFIX_ROWS=()      # "rel<TAB>prefix" rows of every valid prefix
 declare -a SKIP_NAME_ARRAY=()  # basenames that are never copied (lowercased)
-MATCH_DEST=""                  # resolved destination (relative to skeleton)
+declare -A DEST_SOURCE=()      # dest file -> source file that wrote it this run
+declare -i TOTAL_AUTHORS=0
+MATCH_DEST=""                  # resolved destination (relative to staging)
 MATCH_AMBIGUOUS=false
 
 # --- default config location (next to the repo's config/ directory) ----------
@@ -147,13 +177,19 @@ merge_usage() {
     version="$(sed -n 's/^# Version:[[:space:]]*//p' "$0" | head -n 1)"
     echo "bin/merge_books_into_skeleton.sh v$version" >&2
     echo "" >&2
-    echo "Usage: $0 --source=DIR --skeleton=DIR [OPTIONS]" >&2
+    echo "Usage: $0 --source=DIR --input-file=FILE [OPTIONS]" >&2
     echo "" >&2
     echo "Required:" >&2
     echo "  -s, --source=DIR      Archive root whose top-level folders are authors" >&2
-    echo "  -k, --skeleton=DIR    Pre-built prefix skeleton (source of truth)" >&2
+    echo "  -i, --input-file=FILE Flat author list (one canonical name per line);" >&2
+    echo "                        the source of truth for the prefix tree" >&2
     echo "" >&2
     echo "Optional:" >&2
+    echo "  -o, --output-root=DIR Parent dir for the staging tree; books land in" >&2
+    echo "                        <DIR>/BooksInput_<timestamp> (built, pruned)" >&2
+    echo "      --timestamp=STAMP Staging suffix [default: YYYYMMDD-HHMMSS]" >&2
+    echo "  -m, --min-authors=NUM Minimum authors per prefix [default: 10]" >&2
+    echo "  -x, --max-prefix=NUM  Deepest prefix level [default: 5]" >&2
     echo "  -r, --report-dir=DIR  Where the TSV reports are written" >&2
     echo "      --config=FILE     Config file [default: config/merge_books.conf]" >&2
     echo "      --recursive       Copy book-series subfolders recursively [default]" >&2
@@ -218,7 +254,18 @@ merge_parse_args() {
                 OVERWRITE_POLICY="$2"
                 shift
                 ;;
-            -s=*|--source=*|-k=*|--skeleton=*|-r=*|--report-dir=*)
+            --timestamp=*)
+                TIMESTAMP="${arg#*=}"
+                ;;
+            --timestamp)
+                if (( $# < 2 )); then
+                    echo "Error: --timestamp requires a value." >&2
+                    exit 1
+                fi
+                TIMESTAMP="$2"
+                shift
+                ;;
+            -s=*|--source=*|-i=*|--input-file=*|-o=*|--output-root=*|-r=*|--report-dir=*|-m=*|--min-authors=*|-x=*|--max-prefix=*)
                 flag="${arg%%=*}"
                 value="${arg#*=}"
                 if [[ -z "$value" ]]; then
@@ -226,12 +273,15 @@ merge_parse_args() {
                     exit 1
                 fi
                 case "$flag" in
-                    -s|--source)      SOURCE_DIR="$value" ;;
-                    -k|--skeleton)    SKELETON_ROOT="$value" ;;
-                    -r|--report-dir)  REPORT_DIR="$value" ;;
+                    -s|--source)        SOURCE_DIR="$value" ;;
+                    -i|--input-file)    INPUT_FILE="$value" ;;
+                    -o|--output-root)   OUTPUT_ROOT="$value" ;;
+                    -r|--report-dir)    REPORT_DIR="$value" ;;
+                    -m|--min-authors)   MINIMUM_AUTHORS="$value" ;;
+                    -x|--max-prefix)    MAX_PREFIX_LENGTH="$value" ;;
                 esac
                 ;;
-            -s|--source|-k|--skeleton|-r|--report-dir)
+            -s|--source|-i|--input-file|-o|--output-root|-r|--report-dir|-m|--min-authors|-x|--max-prefix)
                 if (( $# < 2 )); then
                     echo "Error: $arg requires a value." >&2
                     exit 1
@@ -248,9 +298,12 @@ merge_parse_args() {
                     value="${value#=}"
                 fi
                 case "$arg" in
-                    -s|--source)      SOURCE_DIR="$value" ;;
-                    -k|--skeleton)    SKELETON_ROOT="$value" ;;
-                    -r|--report-dir)  REPORT_DIR="$value" ;;
+                    -s|--source)        SOURCE_DIR="$value" ;;
+                    -i|--input-file)    INPUT_FILE="$value" ;;
+                    -o|--output-root)   OUTPUT_ROOT="$value" ;;
+                    -r|--report-dir)    REPORT_DIR="$value" ;;
+                    -m|--min-authors)   MINIMUM_AUTHORS="$value" ;;
+                    -x|--max-prefix)    MAX_PREFIX_LENGTH="$value" ;;
                 esac
                 shift
                 ;;
@@ -264,8 +317,8 @@ merge_parse_args() {
                 while (( $# > 0 )); do
                     if [[ -z "$SOURCE_DIR" ]]; then
                         SOURCE_DIR="$1"
-                    elif [[ -z "$SKELETON_ROOT" ]]; then
-                        SKELETON_ROOT="$1"
+                    elif [[ -z "$INPUT_FILE" ]]; then
+                        INPUT_FILE="$1"
                     else
                         echo "Error: Too many positional arguments." >&2
                         merge_usage
@@ -283,8 +336,8 @@ merge_parse_args() {
             *)
                 if [[ -z "$SOURCE_DIR" ]]; then
                     SOURCE_DIR="$arg"
-                elif [[ -z "$SKELETON_ROOT" ]]; then
-                    SKELETON_ROOT="$arg"
+                elif [[ -z "$INPUT_FILE" ]]; then
+                    INPUT_FILE="$arg"
                 else
                     echo "Error: Too many positional arguments." >&2
                     merge_usage
@@ -359,6 +412,20 @@ merge_normalize_overwrite() {
 }
 
 # -----------------------------------------------------------------------------
+# merge_normalize_positive
+# -----------------------------------------------------------------------------
+# Validate that a config/env value is a positive integer.  Aborts otherwise.
+# -----------------------------------------------------------------------------
+merge_normalize_positive() {
+    local label="$1" value="$2"
+    if [[ ! "$value" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Error: $label must be a positive integer, got '$value'." >&2
+        exit 1
+    fi
+    printf '%s' "$value"
+}
+
+# -----------------------------------------------------------------------------
 # merge_load_config
 # -----------------------------------------------------------------------------
 # Source the config file (explicit --config > $MERGE_CONFIG > the default
@@ -373,10 +440,13 @@ merge_load_config() {
     # a config assignment would otherwise clobber the environment variable
     # and silently defeat the env > config precedence.
     local env_source="${MERGE_SOURCE_DIR:-}"
-    local env_skeleton="${MERGE_SKELETON_ROOT:-}"
+    local env_input="${MERGE_INPUT_FILE:-}"
+    local env_output="${MERGE_OUTPUT_DIR:-}"
     local env_report="${MERGE_REPORT_DIR:-}"
     local env_recursive="${MERGE_RECURSIVE:-}"
     local env_overwrite="${MERGE_OVERWRITE:-}"
+    local env_min="${MERGE_MIN_AUTHORS:-}"
+    local env_max="${MERGE_MAX_PREFIX:-}"
     local env_skip_names="${MERGE_SKIP_NAMES:-}"
 
     if [[ -f "$cfg" ]]; then
@@ -394,8 +464,11 @@ merge_load_config() {
     if [[ -n "${MERGE_SOURCE_DIR:-}" ]]; then
         SOURCE_DIR="$MERGE_SOURCE_DIR"
     fi
-    if [[ -n "${MERGE_SKELETON_ROOT:-}" ]]; then
-        SKELETON_ROOT="$MERGE_SKELETON_ROOT"
+    if [[ -n "${MERGE_INPUT_FILE:-}" ]]; then
+        INPUT_FILE="$MERGE_INPUT_FILE"
+    fi
+    if [[ -n "${MERGE_OUTPUT_DIR:-}" ]]; then
+        OUTPUT_ROOT="$MERGE_OUTPUT_DIR"
     fi
     if [[ -n "${MERGE_REPORT_DIR:-}" ]]; then
         REPORT_DIR="$MERGE_REPORT_DIR"
@@ -406,18 +479,33 @@ merge_load_config() {
     if [[ -n "${MERGE_OVERWRITE:-}" ]]; then
         OVERWRITE_POLICY="$(merge_normalize_overwrite "$MERGE_OVERWRITE")"
     fi
+    if [[ -n "${MERGE_MIN_AUTHORS:-}" ]]; then
+        MINIMUM_AUTHORS="$(merge_normalize_positive "MERGE_MIN_AUTHORS" "$MERGE_MIN_AUTHORS")"
+    fi
+    if [[ -n "${MERGE_MAX_PREFIX:-}" ]]; then
+        MAX_PREFIX_LENGTH="$(merge_normalize_positive "MERGE_MAX_PREFIX" "$MERGE_MAX_PREFIX")"
+    fi
 
     if [[ -n "$env_source" ]]; then
         SOURCE_DIR="$env_source"
     fi
-    if [[ -n "$env_skeleton" ]]; then
-        SKELETON_ROOT="$env_skeleton"
+    if [[ -n "$env_input" ]]; then
+        INPUT_FILE="$env_input"
+    fi
+    if [[ -n "$env_output" ]]; then
+        OUTPUT_ROOT="$env_output"
     fi
     if [[ -n "$env_report" ]]; then
         REPORT_DIR="$env_report"
     fi
     if [[ -n "$env_recursive" ]]; then
         RECURSIVE="$(merge_normalize_bool "$env_recursive")"
+    fi
+    if [[ -n "$env_min" ]]; then
+        MINIMUM_AUTHORS="$(merge_normalize_positive "MERGE_MIN_AUTHORS" "$env_min")"
+    fi
+    if [[ -n "$env_max" ]]; then
+        MAX_PREFIX_LENGTH="$(merge_normalize_positive "MERGE_MAX_PREFIX" "$env_max")"
     fi
     if [[ -n "${MERGE_SKIP_NAMES:-}" ]]; then
         SKIP_NAMES="$MERGE_SKIP_NAMES"
@@ -460,27 +548,186 @@ merge_is_skipped_name() {
 }
 
 # -----------------------------------------------------------------------------
-# merge_collect_skeleton_dirs
+# merge_prefix_to_path
 # -----------------------------------------------------------------------------
-# Walk SKELETON_ROOT and store every subdirectory as "rel<TAB>prefix" in
-# SKEL_DIRS.  The root itself is excluded: an empty skeleton must leave
-# every author unmatched, not route everything into the root.
+# Convert a prefix into its slash-joined directory path, substituting a
+# caret for every apostrophe so paths stay shell- and filesystem-safe
+# ("О'Брайен" -> "О", then "О^"), exactly like the shell-mode builder emits.
+#
+# Arguments:
+#   $1 - the prefix, e.g. "Абра"
+#
+# Output:
+#   the path, e.g. "А/Аб/Абр/Абра" (every intermediate prefix becomes one
+#   directory component).
 # -----------------------------------------------------------------------------
-merge_collect_skeleton_dirs() {
-    local dir rel prefix
-    SKEL_DIRS=()
+merge_prefix_to_path() {
+    local current_prefix="$1"
+    local -a directory_components=()
+    local prefix_length component
+    local IFS="/"
 
-    while IFS= read -r dir; do
-        rel="${dir#"$SKELETON_ROOT"/}"
-        prefix="${rel##*/}"
-        SKEL_DIRS+=("$rel"$'\t'"$prefix")
-    done < <(find "$SKELETON_ROOT" -mindepth 1 -type d | LC_ALL=C sort)
+    for (( prefix_length = 1;
+           prefix_length <= ${#current_prefix};
+           prefix_length++ ))
+    do
+        component="${current_prefix:0:prefix_length}"
+        component="${component//\'/^}"
+        directory_components+=("$component")
+    done
+
+    printf '%s' "${directory_components[*]}"
+}
+
+# -----------------------------------------------------------------------------
+# merge_walk_prefix
+# -----------------------------------------------------------------------------
+# Recursively walk one branch of the prefix tree over the sorted author
+# array and record EVERY valid prefix as an index row (path<TAB>last
+# component).  This is the SQL-mode walk of bin/build_shell_nested_authors.sh
+# (all valid prefixes, not just the deepest), because resolution needs every
+# level: author "Абби Линн" resolves to А/Аб, an ancestor of the deepest
+# emitted directory.
+#
+# Arguments:
+#   $1 - current prefix, e.g. "Аб"
+#   $2 - range_start: first index (inclusive) of SORTED_AUTHORS starting
+#        with the current prefix
+#   $3 - range_end:   index just past the last such author (exclusive)
+# -----------------------------------------------------------------------------
+merge_walk_prefix() {
+    local current_prefix="$1"
+    local range_start="$2"
+    local range_end="$3"
+    local prefix_length=${#current_prefix}
+    local matching_author_count=$(( range_end - range_start ))
+
+    local i current_author next_character
+    local child_start child_end next_prefix path
+
+    # --- Prune invalid branches -------------------------------------------
+    # Every descendant of this prefix can only match the same or fewer
+    # authors.  Once the count drops below the minimum, no deeper prefix can
+    # become valid again, so the branch is dead.
+    if (( matching_author_count < MINIMUM_AUTHORS )); then
+        return
+    fi
+
+    # --- Record this valid prefix -----------------------------------------
+    path="$(merge_prefix_to_path "$current_prefix")"
+    PREFIX_ROWS+=("$path"$'\t'"${path##*/}")
+
+    # --- Maximum depth reached ---------------------------------------------
+    if (( prefix_length >= MAX_PREFIX_LENGTH )); then
+        return
+    fi
+
+    # --- Discover children in one pass over the range -----------------------
+    for (( i = range_start; i < range_end; )); do
+        current_author="${SORTED_AUTHORS[i]}"
+
+        # An author exactly equal to the prefix has no character after it
+        # and therefore starts no child branch.
+        if (( ${#current_author} <= prefix_length )); then
+            (( i += 1 ))
+            continue
+        fi
+
+        next_character="${current_author:prefix_length:1}"
+
+        # Expand the run of identical next characters.
+        child_start=$i
+        (( i += 1 ))
+        while (( i < range_end )); do
+            if [[ "${SORTED_AUTHORS[i]:prefix_length:1}" != "$next_character" ]]; then
+                break
+            fi
+            (( i += 1 ))
+        done
+        child_end=$i
+
+        # A space is a word boundary, never a directory level.  Authors like
+        # "де Бальзак Оноре" share the prefix "де " (ending in a space); if
+        # that child became a directory, the path would get a component with
+        # a trailing space.  Skip the space run entirely.
+        if [[ "$next_character" == " " ]]; then
+            continue
+        fi
+
+        next_prefix="${current_prefix}${next_character}"
+
+        # Recurse only into valid children (count check happens inside).
+        merge_walk_prefix "$next_prefix" "$child_start" "$child_end"
+    done
+}
+
+# -----------------------------------------------------------------------------
+# merge_build_prefix_index
+# -----------------------------------------------------------------------------
+# Load INPUT_FILE into SORTED_AUTHORS and walk it to fill PREFIX_ROWS with
+# every valid prefix ("rel<TAB>prefix"), replacing the on-disk skeleton scan
+# of the pre-refactor pipeline.
+#
+# Pipeline stages, in order:
+#   1. tr -d '\r'   -- strip Windows CR characters (CRLF -> LF).
+#   2. grep -v '^$' -- drop blank lines.
+#   3. sort         -- sort alphabetically; identical prefixes become
+#                      adjacent, which the range-based walker depends on.
+#
+# LC_ALL=C (byte order) is deliberate, mirroring the tree builder: locale
+# collation is case-insensitive in many environments, so "В" and "в" would
+# sort adjacent and break the contiguity of same-prefix runs.  UTF-8 byte
+# order is a strict, deterministic total order.
+# -----------------------------------------------------------------------------
+merge_build_prefix_index() {
+    local i=0 root_prefix child_start child_end
+
+    if [[ ! -f "$INPUT_FILE" ]]; then
+        echo "Error: input file '$INPUT_FILE' not found." >&2
+        exit 1
+    fi
+
+    mapfile -t SORTED_AUTHORS < <(
+        tr -d '\r' < "$INPUT_FILE" |
+        grep -v '^$' |
+        LC_ALL=C sort
+    )
+
+    TOTAL_AUTHORS=${#SORTED_AUTHORS[@]}
+
+    if (( TOTAL_AUTHORS == 0 )); then
+        echo "Error: input file '$INPUT_FILE' contains no author lines." >&2
+        exit 1
+    fi
+
+    PREFIX_ROWS=()
+
+    while (( i < TOTAL_AUTHORS )); do
+        root_prefix="${SORTED_AUTHORS[i]:0:1}"
+        child_start=$i
+
+        # Extend the run while the first character is unchanged.
+        while (( i < TOTAL_AUTHORS )); do
+            if [[ "${SORTED_AUTHORS[i]:0:1}" != "$root_prefix" ]]; then
+                break
+            fi
+            (( i += 1 ))
+        done
+
+        child_end=$i
+        merge_walk_prefix "$root_prefix" "$child_start" "$child_end"
+    done
+
+    if (( ${#PREFIX_ROWS[@]} == 0 )); then
+        echo "Error: no valid prefixes at minimum $MINIMUM_AUTHORS authors per prefix." >&2
+        exit 1
+    fi
 }
 
 # -----------------------------------------------------------------------------
 # merge_find_dest
 # -----------------------------------------------------------------------------
-# Resolve an archive author name to the deepest matching skeleton directory.
+# Resolve an archive author name to the deepest valid prefix directory.
 #
 # Arguments:
 #   $1 - the author name
@@ -491,13 +738,17 @@ merge_collect_skeleton_dirs() {
 #
 # Returns 0 when a unique destination was found, 1 when unmatched or
 # ambiguous (the caller distinguishes them via MATCH_AMBIGUOUS).
+#
+# The index is generated from a flat author list, so each prefix has exactly
+# one path; the ambiguity branch is kept defensively in case the index ever
+# changes shape (e.g. a future hybrid mode).
 # -----------------------------------------------------------------------------
 merge_find_dest() {
     local author="$1"
     local -a matched=()
     local entry rel prefix len maxlen=0
 
-    for entry in "${SKEL_DIRS[@]}"; do
+    for entry in "${PREFIX_ROWS[@]}"; do
         rel="${entry%%$'\t'*}"
         prefix="${entry#*$'\t'}"
         # Byte-prefix comparison: exact for UTF-8 in byte- and multibyte bash.
@@ -518,8 +769,9 @@ merge_find_dest() {
         return 1
     fi
 
-    # Collapse duplicate paths (same dir found once per entry); more than
-    # one DISTINCT path at the longest length is an ambiguous match.
+    # Collapse duplicate paths (the index cannot produce them, but stay
+    # defensive); more than one DISTINCT path at the longest length is an
+    # ambiguous match.
     local -A seen=()
     local -a distinct=()
     for rel in "${matched[@]}"; do
@@ -551,7 +803,7 @@ merge_find_dest() {
 #   $2 - human-readable reason
 #   $3 - source author name
 #   $4 - source file (relative to the author folder, or "-")
-#   $5 - destination path relative to the skeleton (or "-")
+#   $5 - destination path relative to the staging root (or "-")
 # -----------------------------------------------------------------------------
 merge_record() {
     local status="$1" reason="$2" author="$3" src="$4" dest="$5"
@@ -629,7 +881,7 @@ merge_should_overwrite() {
 # -----------------------------------------------------------------------------
 merge_copy_file() {
     local author="$1" src="$2" rel="$3" target="$4"
-    local dest_rel="${target#"$SKELETON_ROOT"/}"
+    local dest_rel="${target#"$STAGING_DIR"/}"
     local status reason
 
     # Windows metadata files (desktop.ini, Thumbs.db, ...) are never copied.
@@ -748,10 +1000,10 @@ merge_process_author() {
 
     if ! merge_find_dest "$author"; then
         local status="unmatched-author"
-        local reason="no skeleton prefix matches the author name"
+        local reason="no valid prefix matches the author name"
         if [[ "$MATCH_AMBIGUOUS" == true ]]; then
             status="ambiguous-author"
-            reason="several skeleton paths share the longest matching prefix"
+            reason="several prefix paths share the longest matching prefix"
         fi
         merge_record_unmatched "$status" "$reason" "$author_dir"
         return
@@ -760,12 +1012,12 @@ merge_process_author() {
     # The author becomes its own directory under the deepest matching prefix,
     # so authors that share a prefix never collide their books together.  If
     # the matched prefix is already the author's own name, it IS that folder
-    # (created earlier, or a pre-built one) -- do not append it a second time.
+    # (created earlier) -- do not append it a second time.
     local dest_dir
     if [[ "${MATCH_DEST##*/}" == "$author" ]]; then
-        dest_dir="$SKELETON_ROOT/$MATCH_DEST"
+        dest_dir="$STAGING_DIR/$MATCH_DEST"
     else
-        dest_dir="$SKELETON_ROOT/$MATCH_DEST/$author"
+        dest_dir="$STAGING_DIR/$MATCH_DEST/$author"
     fi
 
     if [[ "$RECURSIVE" == true ]]; then
@@ -813,7 +1065,7 @@ merge_prepare_reports() {
     SKIPPED_FILES="$REPORT_DIR/skipped-files.tsv"
 
     local header
-    header="processed_at	source_author	source_file	destination_file	status	reason"
+    header="processed_at\tsource_author\tsource_file\tdestination_file\tstatus\treason"
     for f in "$MANIFEST" "$UNMATCHED_AUTHORS" "$AMBIGUOUS_AUTHORS" \
              "$COLLISIONS" "$DUPLICATES" "$SKIPPED_FILES"; do
         printf '%s\n' "$header" > "$f"
@@ -823,8 +1075,9 @@ merge_prepare_reports() {
 # -----------------------------------------------------------------------------
 # merge_main
 # -----------------------------------------------------------------------------
-# Program entry point: load configuration, parse, validate, collect the
-# skeleton, process every author folder, and print a summary.
+# Program entry point: load configuration, parse, validate, build the prefix
+# index, process every author folder into the timestamped staging tree, and
+# print a summary.
 # -----------------------------------------------------------------------------
 merge_main() {
     merge_find_config "$@"
@@ -832,6 +1085,8 @@ merge_main() {
     merge_parse_args "$@"
 
     OVERWRITE_POLICY="$(merge_normalize_overwrite "$OVERWRITE_POLICY")"
+    MINIMUM_AUTHORS="$(merge_normalize_positive "minimum authors" "$MINIMUM_AUTHORS")"
+    MAX_PREFIX_LENGTH="$(merge_normalize_positive "maximum prefix length" "$MAX_PREFIX_LENGTH")"
     merge_load_skip_names
 
     if [[ -z "$SOURCE_DIR" ]]; then
@@ -839,8 +1094,13 @@ merge_main() {
         merge_usage
         exit 1
     fi
-    if [[ -z "$SKELETON_ROOT" ]]; then
-        echo "Error: no skeleton directory given (--skeleton or MERGE_SKELETON_ROOT)." >&2
+    if [[ -z "$INPUT_FILE" ]]; then
+        echo "Error: no input file given (--input-file or MERGE_INPUT_FILE)." >&2
+        merge_usage
+        exit 1
+    fi
+    if [[ -z "$OUTPUT_ROOT" ]]; then
+        echo "Error: no output root given (--output-root or MERGE_OUTPUT_DIR)." >&2
         merge_usage
         exit 1
     fi
@@ -848,25 +1108,48 @@ merge_main() {
         echo "Error: source directory '$SOURCE_DIR' does not exist or is not a directory." >&2
         exit 1
     fi
-    if [[ ! -d "$SKELETON_ROOT" ]]; then
-        echo "Error: skeleton directory '$SKELETON_ROOT' does not exist or is not a directory." >&2
-        echo "Build it first with bin/build_shell_nested_authors.sh." >&2
+    if [[ ! -f "$INPUT_FILE" ]]; then
+        echo "Error: input file '$INPUT_FILE' does not exist or is not a regular file." >&2
         exit 1
     fi
 
+    # Safety net: never let an empty, absolute-root, or home directory be the
+    # parent of a staging tree by a typo in -o or the MERGE_OUTPUT_DIR value.
+    case "$OUTPUT_ROOT" in
+        ""|"/"|"//"|"$HOME"|"$HOME"/*)
+            echo "Error: refusing to use dangerous output root '$OUTPUT_ROOT'." >&2
+            exit 1
+            ;;
+    esac
+
+    STAGING_DIR="$OUTPUT_ROOT/BooksInput_$TIMESTAMP"
+    if [[ -e "$STAGING_DIR" ]]; then
+        # Not an error: an existing staging tree is treated like the old
+        # persistent skeleton -- files already present are handled by the
+        # overwrite policy, so deliberate re-runs and incremental
+        # repopulation work (second-resolution timestamps keep accidental
+        # same-name collisions astronomically unlikely).
+        echo "Note: staging '$STAGING_DIR' already exists; existing files follow the overwrite policy." >&2
+    fi
+
     merge_prepare_reports
-    merge_collect_skeleton_dirs
+    merge_build_prefix_index
+
+    if [[ "$DRY_RUN" == false ]]; then
+        mkdir -p -- "$STAGING_DIR"
+    fi
 
     local version
     version="$(sed -n 's/^# Version:[[:space:]]*//p' "$0" | head -n 1)"
     echo "merge_books_into_skeleton.sh v$version"
-    echo "  source:   $SOURCE_DIR"
-    echo "  skeleton: $SKELETON_ROOT"
-    echo "  reports:  $REPORT_DIR"
-    echo "  recursive: $RECURSIVE   overwrite: $OVERWRITE_POLICY"
-    echo "  skip:     ${SKIP_NAMES:-<none>}"
+    echo "  source:     $SOURCE_DIR"
+    echo "  input:      $INPUT_FILE ($TOTAL_AUTHORS authors, min $MINIMUM_AUTHORS, max prefix $MAX_PREFIX_LENGTH)"
+    echo "  staging:    $STAGING_DIR"
+    echo "  reports:    $REPORT_DIR"
+    echo "  recursive:  $RECURSIVE   overwrite: $OVERWRITE_POLICY"
+    echo "  skip:       ${SKIP_NAMES:-<none>}"
     if [[ "$DRY_RUN" == true ]]; then
-        echo "  mode:     DRY RUN - nothing will be copied"
+        echo "  mode:       DRY RUN - nothing will be copied"
     fi
 
     local author_dir authors=0

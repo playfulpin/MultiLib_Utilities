@@ -7,7 +7,86 @@ All notable changes to the author-toolchain scripts in this repository:
 `bin/merge_books_into_skeleton.sh`, and
 `bin/merge_skeleton_into_books.sh`.
 
-## [Unreleased] - 2026-09-01
+## [Unreleased] - 2026-09-01 (library-catalog refactor)
+
+- **Refactor branch `refactor/update-library-catalog`: the merge pipeline no
+  longer uses the `Empty_Skeleton` folder.**  `bin/build_shell_nested_authors.sh`
+  remains for `mkdir -p` scripts and the SQL nested-set table, but the book
+  merge builds the prefix tree **in memory** from the flat author list and
+  writes straight into a timestamped, pruned staging tree
+  `<output-root>/BooksInput_<timestamp>` — only directories that receive a
+  copied file are created, so the prune pass is gone by construction.
+
+- **`bin/merge_books_into_skeleton.sh` v0.1.3 → 0.2.0** (with
+  `lib/merge_books_functions.sh` 0.1.3 → 0.2.0).  The on-disk skeleton scan
+  (`merge_collect_skeleton_dirs`) is replaced by `merge_build_prefix_index`:
+  the same `LC_ALL=C` byte-sort + contiguous-range walk as the builder
+  (SQL-mode semantics — every valid prefix, not just the deepest, because
+  resolution needs ancestors too), with apostrophe→caret path substitution
+  matching the old emitted directories.  The clean break drops `--skeleton`
+  entirely; new flags `-i/--input-file` (required), `-o/--output-root`,
+  `--timestamp`, `-m/--min-authors`, `-x/--max-prefix`; config gains
+  `MERGE_INPUT_FILE`, `MERGE_OUTPUT_DIR`, `MERGE_MIN_AUTHORS`,
+  `MERGE_MAX_PREFIX`.  An existing staging name is not an error: it is
+  treated like the old persistent skeleton (duplicate/overwrite policy
+  applies), so incremental re-runs work.  Ambiguity can no longer arise from
+  a hand-built skeleton (each prefix has exactly one path); the code path is
+  kept defensively.  Suite rewritten for the in-memory mode: **44/44 checks**
+  green under WSL.
+
+- **`bin/merge_skeleton_into_books.sh` v0.1.3 → 0.2.0.**  The three-step
+  rename → prune → copy loop is replaced by a thin, validated **rsync**
+  wrapper: `rsync -a --ignore-existing --itemize-changes` onto the Books
+  library (destination wins, never overwrites, resumable), with the newest
+  `BooksInput_*` auto-discovered under `--output-root`, path-safety guards,
+  and a per-file TSV report (`copied` / `would-copy` / `kept-existing` /
+  `would-keep`).  `--from-pruned` / `--no-rename` / `--no-prune` are gone;
+  the rename/prune steps no longer exist.  Requires rsync on PATH; Windows
+  metadata is excluded belt-and-braces.  Suite rewritten for the wrapper:
+  **19/19 checks** green under WSL (skips cleanly without rsync).
+
+- **`bin/merge_skeleton_into_books.sh` v0.2.0 → 0.2.1.**  The finalize step
+  now shows a **live progress bar** on the terminal (`rsync -av
+  --info=progress2`); the per-file itemize lines are captured via rsync's
+  `--log-file` instead of stdout, so the TSV report stays exact while the
+  screen stays usable.  After a successful merge the library is **pruned of
+  empty directories** (`find ... -depth -mindepth 1 -type d -empty -delete`)
+  as a safety net for interrupted runs — `--no-prune` / `MERGE_PRUNE_EMPTY_DIRS=false`
+  disables it; a dry run only reports the count.
+
+- **`bin/merge_skeleton_into_books.sh` v0.2.1 → 0.2.2.**  The live progress
+  bar now pipes rsync's itemize listing through `pv -s <total-bytes>`
+  (total from `du -sb` of the staging tree) with stdout discarded; when
+  `pv` is not installed the run falls back to rsync's native
+  `--info=progress2`.  The `--log-file` capture is unchanged, so the TSV
+  report stays exact.  CI now installs pv (and rsync) so the merge suite
+  exercises the pv path on GitHub.
+
+- **`bin/merge_skeleton_into_books.sh` v0.2.2 → 0.2.3.**  The progress bar
+  switches from `pv -s <bytes>` to `pv -l -s <item-count>` for an accurate
+  percentage: pv counts listing lines (one per transferred file AND one
+  per transferred directory, since rsync -a lists both), so the count is
+  `find ... \( -type f -o -type d \) | wc -l`; a grep filter strips
+  rsync's header/blank/summary lines before pv so the bar lands at exactly
+  100%.  The `--log-file` capture and the `--info=progress2` fallback are
+  unchanged.
+
+- **First real finalize run (`BooksInput_20260903-140717` → `Books_01`).**
+  Ran `bin/merge_skeleton_into_books.sh --target /mnt/c/Backup_Go7/Books_01
+  --report-dir /mnt/c/Backup_Go7/merge-reports` against the newest staging
+  tree (157 files, ~0.09 GB).  Result: **copied 0, kept-existing 157** —
+  `Books_01` already contained every staged file (it was populated at the
+  same time the staging tree was created), so `--ignore-existing` skipped
+  everything; 0 empty dirs pruned; staging retained; report at
+  `merge-reports/merge_skeleton_into_books_20260903-151230.tsv`.
+
+- **Docs:** `docs/BOOK_LIBRARY_MERGE_PLAN.md` rewritten for the two-step
+  pipeline (in-memory merge → rsync finalize); README tool sections, testing
+  table, CI blurb, and repository layout updated; RELEASE_NOTES shipped
+  tools and merge-tool prose updated.  Stale `bin/merge_skeleton_into_books.sh.bak`
+  and `.01.bak` files removed.
+
+## [Unreleased] - 2026-09-01 (CI & version automation)
 
 - **New development workflow: GitHub Actions CI + version automation.**
   - `.github/workflows/ci.yml` runs on every push/PR: shell syntax check

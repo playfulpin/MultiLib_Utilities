@@ -3,29 +3,35 @@
 ###############################################################################
 # tests/test_merge_skeleton_into_books.sh
 #
-# Regression suite for bin/merge_skeleton_into_books.sh, the finalize step
-# that turns the populated skeleton into the Books library:
-#
-#     1. rename the skeleton to a timestamped staging folder BooksInput_<ts>;
-#     2. remove every empty directory inside the staging folder;
-#     3. copy the remaining content into Books, never overwriting anything.
+# Regression suite for bin/merge_skeleton_into_books.sh, the rsync wrapper
+# that finalizes a timestamped staging tree (BooksInput_<ts>, produced by
+# bin/merge_books_into_skeleton.sh, already pruned) into the Books library.
+# The destination wins: --ignore-existing never overwrites a file already
+# present in the library.  A per-file TSV report records every copied file
+# and every kept-existing conflict.
 #
 # Coverage:
-#   * DRY RUN          -- prints the three steps, writes a would-copy report,
-#                         and changes nothing.
-#   * FULL RUN         -- rename + prune + copy-without-overwrite + retain staging.
-#   * NO-RENAME        -- source keeps its name (only prune + copy).
-#   * FROM-PRUNED      -- --from-pruned skips rename + prune.
-#   * AUTO-DETECT      -- source named BooksInput_* automatically skips rename + prune.
-#   * CLI              -- usage errors, -h/-v, staging collision, guards.
-#   * VERSION          -- script carries a 0.1.x header version.
+#   * DRY RUN      -- resolves the staging tree, writes a would-copy/would-keep
+#                     report, and changes nothing.
+#   * FULL RUN     -- new content is copied into Books, pre-existing files
+#                     are kept, staging is retained, the report records both.
+#   * AUTO-DETECT  -- with no --source, the newest BooksInput_* folder under
+#                     --output-root is used.
+#   * PROGRESS     -- the pv -l progress filter (extracted from the script)
+#                     strips rsync's header/blank/summary lines so the line
+#                     tally equals the files+dirs item count (exact 100%),
+#                     with and without a pre-existing destination.
+#   * CLI          -- usage errors, -h/-v, path-safety guards (dangerous
+#                     root, non-BooksInput_* source, target inside source).
+#   * VERSION      -- script carries a 0.2.x header version.
 #
 # Usage:
 #   bash tests/test_merge_skeleton_into_books.sh
 #
-# Runs under both Cygwin/MSYS bash and WSL (no UTF-8 slicing involved).
+# Requires rsync on PATH; the suite SKIPS (exit 0) when it is absent (e.g.
+# Git Bash without rsync).  Ubuntu CI runners ship rsync.
 #
-# Exit status: 0 if every check passed, 1 otherwise.
+# Exit status: 0 if every check passed, 1 otherwise; 2 if misconfigured.
 ###############################################################################
 
 set -euo pipefail
@@ -34,6 +40,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$SCRIPT_DIR/../bin/merge_skeleton_into_books.sh"
 
 [[ -f "$SCRIPT" ]] || { echo "ERROR: $SCRIPT not found" >&2; exit 2; }
+
+# rsync is a hard prerequisite of the tool; skip the whole suite without it
+# so a bare Git Bash (no rsync) stays green.
+if ! command -v rsync >/dev/null 2>&1; then
+    echo "SKIP  (rsync not found on PATH)"
+    exit 0
+fi
+
+# MSYS/Cygwin rsync misreads converted Windows-drive paths as remote hosts
+# ("The source and destination cannot both be remote"), so the suite -- like
+# the tool -- is only usable where rsync sees real POSIX paths (WSL, Linux).
+# Probing uname is far cheaper and more reliable than letting every check
+# fail with that cryptic rsync usage error.
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*)
+        echo "SKIP  (MSYS rsync cannot sync Windows-drive paths; run from WSL)"
+        exit 0
+        ;;
+esac
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -66,21 +91,19 @@ run_script() { # out err -- args...
 }
 
 ###############################################################################
-# fixture: a populated skeleton + a Books library with one conflicting file
+# fixture: a BooksInput_* staging tree + a Books library with one conflict
 ###############################################################################
 build_fixture() { # base
     local base="$1"
-    local sk="$base/Empty_Skeleton" books="$base/Books"
+    local staging="$base/BooksInput_t1" books="$base/Books"
 
-    mkdir -p "$sk/Т/То/Толс/Толстой Лев Николаевич"
-    mkdir -p "$sk/С/Сл"
-    mkdir -p "$sk/emptyA"
-    mkdir -p "$sk/emptyB/inner"
-
-    printf 'fb2\n' > "$sk/Т/То/Толс/Толстой Лев Николаевич/Война и мир.fb2"
-    printf 'SRC\n' > "$sk/С/Сл/Same.fb2"
-
+    mkdir -p "$staging/Т/То/Толс/Толстой Лев Николаевич"
+    mkdir -p "$staging/С/Сл"
+    mkdir -p "$staging/emptyA"
     mkdir -p "$books/С/Сл"
+
+    printf 'fb2\n' > "$staging/Т/То/Толс/Толстой Лев Николаевич/Война и мир.fb2"
+    printf 'SRC\n' > "$staging/С/Сл/Same.fb2"
     printf 'TGT\n' > "$books/С/Сл/Same.fb2"    # pre-existing conflict, wins
     printf 'KEEP\n' > "$books/keep.fb2"
 }
@@ -88,6 +111,52 @@ build_fixture() { # base
 # --- locate the single generated report file in REPORT_DIR ------------------
 report_for() { # report_dir -> prints the file path (or nothing)
     find "$1" -maxdepth 1 -name 'merge_skeleton_into_books_*.tsv' | head -n 1
+}
+
+# The real-run progress pipeline pipes rsync's listing through
+#   grep --line-buffered -v -E '<filter>' | pv -l -s <item-count>
+# The filter regex lives in the script; extract it verbatim so this suite
+# tests the actual implementation and fails loudly if the script line
+# ever changes shape.
+SYNC_FILTER="$(sed -n "s|.*grep --line-buffered -v -E '\([^']*\)'.*|\1|p" "$SCRIPT" | head -n 1)"
+if [[ -z "$SYNC_FILTER" ]]; then
+    echo "ERROR: cannot extract the progress filter regex from $SCRIPT" >&2
+    exit 2
+fi
+
+###############################################################################
+# progress filter: stripped listing must tally exactly files+dirs (100%)
+###############################################################################
+run_progress_tests() {
+    echo "== progress filter (exact 100% tally) =="
+    local base="$TMPDIR/prog"
+    local staging="$base/BooksInput_t1" books="$base/Books"
+    mkdir -p "$staging/d1" "$staging/d2/d3" "$books"
+    for i in $(seq 1 40); do printf 'x\n' > "$staging/d1/f$i.bin"; done
+    for i in $(seq 1 30); do printf 'y\n' > "$staging/d2/d3/g$i.bin"; done
+
+    local items n
+    items="$(find "$staging" -mindepth 1 \( -type f -o -type d \) | wc -l | tr -d ' ')"
+
+    # Destination already exists (the script validates the target upfront),
+    # so rsync emits one line per file/dir plus header/summary noise.
+    n="$(rsync -av "$staging/" "$books/" 2>/dev/null \
+        | grep --line-buffered -v -E "$SYNC_FILTER" | wc -l | tr -d ' ' || true)"
+    if [[ "$n" == "$items" ]]; then
+        report "progress_filter_existing_dst" ok "$n/$items lines"
+    else
+        report "progress_filter_existing_dst" fail "filtered $n lines, expected $items"
+    fi
+
+    # Fresh destination: rsync additionally emits 'created directory' and the
+    # './' root line; the filter must strip those too (worst case).
+    n="$(rsync -av "$staging/" "$base/Books_fresh/" 2>/dev/null \
+        | grep --line-buffered -v -E "$SYNC_FILTER" | wc -l | tr -d ' ' || true)"
+    if [[ "$n" == "$items" ]]; then
+        report "progress_filter_fresh_dst" ok "$n/$items lines"
+    else
+        report "progress_filter_fresh_dst" fail "filtered $n lines, expected $items"
+    fi
 }
 
 ###############################################################################
@@ -100,7 +169,7 @@ run_dry_tests() {
     build_fixture "$base"
 
     run_script "$out" "$err" -- \
-        --source "$base/Empty_Skeleton" --target "$base/Books" \
+        --source "$base/BooksInput_t1" --target "$base/Books" \
         --report-dir "$reports" --dry-run
 
     if (( LAST_RC == 0 )); then
@@ -109,23 +178,27 @@ run_dry_tests() {
         report "dry_exits_0" fail "exit code $LAST_RC"
     fi
 
-    # Source must still be at its original name after a dry run.
-    if [[ -d "$base/Empty_Skeleton" ]] \
-       && [[ -z "$(find "$base" -maxdepth 1 -name 'BooksInput_*' -print -quit)" ]]; then
-        report "dry_source_untouched" ok
+    # Nothing may change in the library.
+    if [[ "$(cat "$base/Books/С/Сл/Same.fb2")" == "TGT" ]] \
+       && [[ "$(cat "$base/Books/keep.fb2")" == "KEEP" ]] \
+       && [[ ! -e "$base/Books/Т/То/Толс/Толстой Лев Николаевич/Война и мир.fb2" ]]; then
+        report "dry_nothing_changed" ok
     else
-        report "dry_source_untouched" fail "dry run renamed or removed the source"
+        report "dry_nothing_changed" fail "dry run changed the library"
     fi
 
-    if grep -q 'would-copy' "$(report_for "$reports")" 2>/dev/null; then
-        report "dry_report_would_copy" ok
+    local rfile
+    rfile="$(report_for "$reports")"
+    if [[ -n "$rfile" ]] && grep -q 'would-copy' "$rfile" \
+       && grep -q 'would-keep' "$rfile"; then
+        report "dry_report_rows" ok
     else
-        report "dry_report_would_copy" fail "report lacks a would-copy row"
+        report "dry_report_rows" fail "report lacks would-copy/would-keep rows"
     fi
 }
 
 ###############################################################################
-# full run: rename, prune, copy-without-overwrite, keep staging
+# full run: copy new content, keep conflicts, retain staging
 ###############################################################################
 run_full_tests() {
     echo "== full run =="
@@ -134,7 +207,7 @@ run_full_tests() {
     build_fixture "$base"
 
     run_script "$out" "$err" -- \
-        --source "$base/Empty_Skeleton" --target "$base/Books" \
+        --source "$base/BooksInput_t1" --target "$base/Books" \
         --report-dir "$reports"
 
     if (( LAST_RC == 0 )); then
@@ -143,26 +216,6 @@ run_full_tests() {
         report "full_exits_0" fail "exit code $LAST_RC"
     fi
 
-    # The source skeleton was renamed to BooksInput_<ts>.
-    local staging
-    staging="$(find "$base" -maxdepth 1 -type d -name 'BooksInput_*' | head -n 1)"
-    if [[ -n "$staging" && ! -e "$base/Empty_Skeleton" ]]; then
-        report "full_renamed" ok
-    else
-        report "full_renamed" fail "source not renamed to BooksInput_<ts>"
-    fi
-
-    # Empty directories were pruned from the staging folder.
-    if [[ -n "$staging" ]] \
-       && [[ ! -d "$staging/emptyA" ]] \
-       && [[ ! -d "$staging/emptyB" ]] \
-       && [[ "$(find "$staging" -type d -empty | wc -l)" == "0" ]]; then
-        report "full_empties_pruned" ok
-    else
-        report "full_empties_pruned" fail "empty directories remain in the staging folder"
-    fi
-
-    # Unique content copied into Books, with the conflict left untouched.
     local ok=true
     [[ "$(cat "$base/Books/Т/То/Толс/Толстой Лев Николаевич/Война и мир.fb2")" == "fb2" ]] || ok=false
     [[ "$(cat "$base/Books/С/Сл/Same.fb2")" == "TGT" ]] || ok=false          # not overwritten
@@ -173,104 +226,39 @@ run_full_tests() {
         report "full_copy_no_overwrite" fail "copy or overwrite behavior wrong"
     fi
 
-    # The staging folder is retained complete with its books.
-    if [[ -n "$staging" ]] \
-       && [[ -f "$staging/Т/То/Толс/Толстой Лев Николаевич/Война и мир.fb2" ]] \
-       && [[ -f "$staging/С/Сл/Same.fb2" ]]; then
+    # Staging retained intact.
+    if [[ -d "$base/BooksInput_t1" ]] \
+       && [[ -f "$base/BooksInput_t1/Т/То/Толс/Толстой Лев Николаевич/Война и мир.fb2" ]]; then
         report "full_staging_retained" ok
     else
-        report "full_staging_retained" fail "staging folder was not retained intact"
+        report "full_staging_retained" fail "staging folder was not retained"
     fi
 
-    # Report shows the kept-existing conflict.
     local rfile
     rfile="$(report_for "$reports")"
-    if [[ -n "$rfile" ]] && grep -q 'kept-existing' "$rfile" \
+    if [[ -n "$rfile" ]] && grep -q '^copied\|copied' "$rfile" \
+       && grep -q 'kept-existing' "$rfile" \
        && grep -q 'Same.fb2' "$rfile"; then
-        report "full_report_kept_existing" ok
+        report "full_report_rows" ok
     else
-        report "full_report_kept_existing" fail "report does not record the kept conflict"
+        report "full_report_rows" fail "report does not record copied and kept-existing"
     fi
 }
 
 ###############################################################################
-# no-rename: prune + copy, source keeps its name
-###############################################################################
-run_no_rename_tests() {
-    echo "== --no-rename =="
-    local base="$TMPDIR/nr" out="$TMPDIR/nr_out.txt" err="$TMPDIR/nr_err.txt"
-    local reports="$TMPDIR/nr_reports"
-    build_fixture "$base"
-
-    run_script "$out" "$err" -- \
-        --source "$base/Empty_Skeleton" --target "$base/Books" \
-        --report-dir "$reports" --no-rename
-
-    if [[ -d "$base/Empty_Skeleton" ]] \
-       && [[ "$(cat "$base/Books/Т/То/Толс/Толстой Лев Николаевич/Война и мир.fb2")" == "fb2" ]]; then
-        report "no_rename_kept_and_copied" ok
-    else
-        report "no_rename_kept_and_copied" fail "no-rename did not keep source or copy content"
-    fi
-}
-
-###############################################################################
-# --from-pruned: skip rename + prune
-###############################################################################
-run_from_pruned_tests() {
-    echo "== --from-pruned =="
-    local base="$TMPDIR/fp" out="$TMPDIR/fp_out.txt" err="$TMPDIR/fp_err.txt"
-    local reports="$TMPDIR/fp_reports"
-    build_fixture "$base"
-
-    # Rename the fixture source to look like a staging folder
-    mv "$base/Empty_Skeleton" "$base/BooksInput_test"
-
-    run_script "$out" "$err" -- \
-        --source "$base/BooksInput_test" --target "$base/Books" \
-        --report-dir "$reports" --from-pruned
-
-    if (( LAST_RC == 0 )); then
-        report "from_pruned_exits_0" ok
-    else
-        report "from_pruned_exits_0" fail "exit code $LAST_RC"
-    fi
-
-    # Source must keep its name
-    if [[ -d "$base/BooksInput_test" ]]; then
-        report "from_pruned_source_kept" ok
-    else
-        report "from_pruned_source_kept" fail "source was renamed or removed"
-    fi
-
-    # Content was copied
-    if [[ "$(cat "$base/Books/Т/То/Толс/Толстой Лев Николаевич/Война и мир.fb2")" == "fb2" ]]; then
-        report "from_pruned_copied" ok
-    else
-        report "from_pruned_copied" fail "content was not copied"
-    fi
-
-    # Mode message appears
-    if grep -q 'mode: from-pruned' "$out"; then
-        report "from_pruned_mode_message" ok
-    else
-        report "from_pruned_mode_message" fail "expected mode message not found"
-    fi
-}
-
-###############################################################################
-# auto-detect: source named BooksInput_* skips rename + prune
+# auto-detect: newest BooksInput_* under --output-root
 ###############################################################################
 run_auto_detect_tests() {
     echo "== auto-detect BooksInput_* =="
     local base="$TMPDIR/ad" out="$TMPDIR/ad_out.txt" err="$TMPDIR/ad_err.txt"
     local reports="$TMPDIR/ad_reports"
     build_fixture "$base"
-
-    mv "$base/Empty_Skeleton" "$base/BooksInput_auto"
+    # A second, older staging folder: discovery must pick the newest.
+    mkdir -p "$base/BooksInput_old"
+    printf 'stale\n' > "$base/BooksInput_old/stale.fb2"
 
     run_script "$out" "$err" -- \
-        --source "$base/BooksInput_auto" --target "$base/Books" \
+        --output-root "$base" --target "$base/Books" \
         --report-dir "$reports"
 
     if (( LAST_RC == 0 )); then
@@ -279,25 +267,16 @@ run_auto_detect_tests() {
         report "auto_detect_exits_0" fail "exit code $LAST_RC"
     fi
 
-    # Source must keep its name (no rename)
-    if [[ -d "$base/BooksInput_auto" ]]; then
-        report "auto_detect_source_kept" ok
+    if grep -q "auto-discovered staging: $base/BooksInput_t1" "$out"; then
+        report "auto_detect_newest" ok
     else
-        report "auto_detect_source_kept" fail "source was renamed"
+        report "auto_detect_newest" fail "did not auto-discover the newest staging folder"
     fi
 
-    # Content was copied
     if [[ "$(cat "$base/Books/Т/То/Толс/Толстой Лев Николаевич/Война и мир.fb2")" == "fb2" ]]; then
         report "auto_detect_copied" ok
     else
-        report "auto_detect_copied" fail "content was not copied"
-    fi
-
-    # Auto-detect message appears
-    if grep -q 'auto-detected BooksInput_\*' "$out" || grep -q 'auto-detected BooksInput_*' "$out"; then
-        report "auto_detect_mode_message" ok
-    else
-        report "auto_detect_mode_message" fail "expected auto-detect message not found"
+        report "auto_detect_copied" fail "newest staging was not copied into Books"
     fi
 }
 
@@ -326,31 +305,21 @@ run_cli_tests() {
         report "cli_version" fail "-v must print the version and exit 0"
     fi
 
-    # Collision on the BooksInput_<ts> name is an error.
-    local pre="$TMPDIR/pre"
-    mkdir -p "$pre/Empty_Skeleton" "$pre/Books" "$pre/BooksInput_test"
-    run_script "$out" "$err" -- --source "$pre/Empty_Skeleton" --target "$pre/Books" --timestamp test
-    if (( LAST_RC != 0 )); then
-        report "cli_staging_collision" ok
-    else
-        report "cli_staging_collision" fail "expected non-zero exit when staging name exists"
-    fi
-
     local -a ERROR_CASES=(
-        "cli_no_args|"
-        "cli_unknown_flag|--bogus $sk $books"
+        "cli_unknown_flag|--bogus"
         "cli_bad_source|--source /nonexistent --target $books"
         "cli_bad_target|--source $sk --target /nonexistent"
         "cli_target_inside_source|--source $sk --target $sk/sub"
+        "cli_not_booksinput|--source $sk/f --target $books"
     )
-    # Isolate the flag-less "no args" case from the real machine: point the
-    # script's environment fallbacks at guaranteed-missing paths so it must
-    # fail on validation regardless of what exists under /mnt/c/Backup_Go7
-    # (a stray Empty_Skeleton once made this case exit 0 and run a real
+    # Isolate the flag-less cases from the real machine: point the script's
+    # environment fallbacks at guaranteed-missing paths so it must fail on
+    # validation regardless of what exists under /mnt/c/Backup_Go7 (a stray
+    # Empty_Skeleton once made an unreleased case exit 0 and run a real
     # finalize).  Explicit flags in the other cases override these env vars.
     for c in "${ERROR_CASES[@]}"; do
         IFS='|' read -r label args <<< "$c"
-        MERGE_SOURCE_DIR="$TMPDIR/no_such_source" \
+        MERGE_OUTPUT_DIR="$TMPDIR/no_such_root" \
         MERGE_TARGET_DIR="$TMPDIR/no_such_target" \
         MERGE_REPORT_DIR="$TMPDIR/cli_reports" \
             run_script "$out" "$err" -- $args
@@ -360,6 +329,14 @@ run_cli_tests() {
             report "$label" fail "expected non-zero exit"
         fi
     done
+
+    # No source and no discovery root: must fail.
+    run_script "$out" "$err" -- --output-root "$TMPDIR/no_such_root" --target "$books"
+    if (( LAST_RC != 0 )); then
+        report "cli_no_staging_found" ok
+    else
+        report "cli_no_staging_found" fail "expected non-zero exit when no BooksInput_* exists"
+    fi
 }
 
 ###############################################################################
@@ -369,10 +346,10 @@ run_release_tests() {
     echo "== version header =="
     local v
     v="$(sed -n 's/^# Version:[[:space:]]*//p' "$SCRIPT" | head -n 1)"
-    if [[ "$v" =~ ^0\.1\.[0-9]+$ ]]; then
+    if [[ "$v" =~ ^0\.2\.[0-9]+$ ]]; then
         report "version_header" ok
     else
-        report "version_header" fail "got '$v', expected ^0\\.1\\.[0-9]+$"
+        report "version_header" fail "got '$v', expected ^0\\.2\\.[0-9]+$"
     fi
 }
 
@@ -380,24 +357,21 @@ run_release_tests() {
 # dispatch
 ###############################################################################
 case "${1:-all}" in
-    all)    run_dry_tests; run_full_tests; run_no_rename_tests
-            run_from_pruned_tests; run_auto_detect_tests
-            run_cli_tests; run_release_tests ;;
+    all)    run_dry_tests; run_full_tests; run_auto_detect_tests
+            run_progress_tests; run_cli_tests; run_release_tests ;;
     dry)    run_dry_tests ;;
     full)   run_full_tests ;;
-    no-rename) run_no_rename_tests ;;
-    from-pruned) run_from_pruned_tests ;;
     auto)   run_auto_detect_tests ;;
+    progress) run_progress_tests ;;
     cli)    run_cli_tests ;;
     release) run_release_tests ;;
     --list)
-        echo "dry:         steps reported, nothing changed"
-        echo "full:        rename + prune + copy-without-overwrite"
-        echo "no-rename:   source keeps its name"
-        echo "from-pruned: --from-pruned skips rename + prune"
-        echo "auto:        BooksInput_* source auto-skips rename + prune"
-        echo "cli:         usage errors, -h/-v, staging collision"
-        echo "release:     0.1.x version header"
+        echo "dry:         would-copy/would-keep report, nothing changed"
+        echo "full:        rsync copy with --ignore-existing (destination wins)"
+        echo "auto:        newest BooksInput_* auto-discovered"
+        echo "progress:    pv -l filter strips header lines -> exact 100% tally"
+        echo "cli:         usage errors, -h/-v, path-safety guards"
+        echo "release:     0.2.x version header"
         exit 0
         ;;
     *) echo "Unknown check group '$1'." >&2; exit 1 ;;
