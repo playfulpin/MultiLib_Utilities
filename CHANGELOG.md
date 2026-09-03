@@ -45,6 +45,26 @@ All notable changes to the author-toolchain scripts in this repository:
   metadata is excluded belt-and-braces.  Suite rewritten for the wrapper:
   **19/19 checks** green under WSL (skips cleanly without rsync).
 
+- **`bin/merge_skeleton_into_books.sh` v0.2.0 → 0.2.1.**  The finalize step
+  now shows a **live progress bar** on the terminal (`rsync -av
+  --info=progress2`); the per-file itemize lines are captured via rsync's
+  `--log-file` instead of stdout, so the TSV report stays exact while the
+  screen stays usable.  After a successful merge the library is **pruned of
+  empty directories** (`find ... -depth -mindepth 1 -type d -empty -delete`)
+  as a safety net for interrupted runs — `--no-prune` / `MERGE_PRUNE_EMPTY_DIRS=false`
+  disables it; a dry run only reports the count.
+
+- **`bin/merge_skeleton_into_books.sh` v0.2.1 → 0.2.2.**  The live progress
+  bar now pipes rsync's itemize listing through `pv -s <total-bytes>`
+  (total from `du -sb` of the staging tree) with stdout discarded; when
+  `pv` is not installed the run falls back to rsync's native
+  `--info=progress2`.  The `--log-file` capture is unchanged, so the TSV
+  report stays exact.  Note: rsync streams file payloads over its own
+  channel, so the pipe carries the listing text — pv shows a live rate/ETA
+  bar whose percentage is not meaningful against the `du -sb` total.  CI
+  now installs pv (and rsync) so the merge suite exercises the pv path on
+  GitHub.
+
 - **Docs:** `docs/BOOK_LIBRARY_MERGE_PLAN.md` rewritten for the two-step
   pipeline (in-memory merge → rsync finalize); README tool sections, testing
   table, CI blurb, and repository layout updated; RELEASE_NOTES shipped

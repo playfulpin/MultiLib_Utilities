@@ -3,8 +3,8 @@
 ###############################################################################
 # bin/merge_skeleton_into_books.sh
 #
-# Version:       0.2.0
-# Last updated:  2026-09-01
+# Version:       0.2.2
+# Last updated:  2026-09-03
 #
 # -----------------------------------------------------------------------------
 # PURPOSE
@@ -14,6 +14,23 @@
 #   with rsync.  The destination wins: --ignore-existing never overwrites a
 #   file already present in the library.  A per-file TSV report records every
 #   copied file and every kept-existing conflict.
+#
+#   Progress is shown live on the terminal: the real run pipes rsync's
+#   itemize listing through pv -s <total-bytes> (total from du -sb of the
+#   staging tree) for a live rate/ETA bar; the per-file itemize lines are
+#   captured with --log-file for the report, so the screen stays usable
+#   while the report stays exact.  When pv is not installed the run falls
+#   back to rsync's native --info=progress2.
+#
+#   NOTE: rsync streams file payloads over its own channel, so the pipe
+#   carries the itemize listing text, not the payload bytes.  pv therefore
+#   shows a live activity/rate bar whose percentage is not meaningful
+#   against the du -sb total; --info=progress2 (or pv -l with a file
+#   count) is the accurate percentage alternative.
+#
+#   After a successful merge the library is pruned of empty directories
+#   (find ... -depth -mindepth 1 -type d -empty -delete) as a safety net for
+#   interrupted runs; --no-prune disables this.
 #
 #   The old three-step finalize (rename -> prune -> copy loop) is gone: the
 #   merge tool now emits the staging tree under its final BooksInput_<ts>
@@ -56,7 +73,7 @@
 #       source_file<TAB>target_file<TAB>status<TAB>reason
 #   status: copied | would-copy | kept-existing | would-keep
 #
-# REQUIRES: rsync on PATH.
+# REQUIRES: rsync on PATH; pv optional (fallback to --info=progress2).
 #
 ###############################################################################
 
@@ -70,6 +87,7 @@ REPORT_DIR="/mnt/c/Backup_Go7/merge-reports"
 DRY_RUN=false
 CONFIG_FILE=""
 REPORT_FILE=""
+PRUNE_EMPTY_DIRS=true
 
 # -----------------------------------------------------------------------------
 # load_config
@@ -100,6 +118,7 @@ load_config() {
             OUTPUT_DIR) OUTPUT_ROOT="$value" ;;
             TARGET_DIR) TARGET_DIR="$value" ;;
             REPORT_DIR) REPORT_DIR="$value" ;;
+            PRUNE_EMPTY_DIRS) PRUNE_EMPTY_DIRS="$value" ;;
             *)
                 echo "Warning: unknown config key '$key' in $file (ignored)" >&2
                 ;;
@@ -123,6 +142,9 @@ apply_environment() {
     if [[ -n "${MERGE_REPORT_DIR:-}" ]]; then
         REPORT_DIR="$MERGE_REPORT_DIR"
     fi
+    if [[ -n "${MERGE_PRUNE_EMPTY_DIRS:-}" ]]; then
+        PRUNE_EMPTY_DIRS="$MERGE_PRUNE_EMPTY_DIRS"
+    fi
 }
 
 # -----------------------------------------------------------------------------
@@ -145,14 +167,20 @@ usage() {
     echo "      --config=FILE      Load defaults from this config file" >&2
     echo "      --dry-run          Show what rsync would copy, write report," >&2
     echo "                         change nothing" >&2
+    echo "      --no-prune         Keep empty directories in the library" >&2
+    echo "                         (pruning is on by default)" >&2
     echo "  -v, --version          Print version and exit 0" >&2
     echo "  -h, --help             Show this help" >&2
     echo "" >&2
-    echo "Sync: rsync -a --ignore-existing (the destination wins, nothing is" >&2
-    echo "overwritten).  Requires rsync on PATH." >&2
+    echo "Sync: rsync -av --ignore-existing (destination wins, nothing is" >&2
+    echo "overwritten); live progress via pv -s when installed, else rsync's" >&2
+    echo "native --info=progress2." >&2
+    echo "After a successful merge, empty directories are pruned from the" >&2
+    echo "library.  Requires rsync on PATH." >&2
     echo "" >&2
     echo "Priority: flag > environment > config file > built-in default" >&2
-    echo "Environment: MERGE_SOURCE_DIR, MERGE_OUTPUT_DIR, MERGE_TARGET_DIR, MERGE_REPORT_DIR" >&2
+    echo "Environment: MERGE_SOURCE_DIR, MERGE_OUTPUT_DIR, MERGE_TARGET_DIR," >&2
+    echo "              MERGE_REPORT_DIR, MERGE_PRUNE_EMPTY_DIRS" >&2
 }
 
 # -----------------------------------------------------------------------------
@@ -171,6 +199,9 @@ parse_arguments() {
                 ;;
             --dry-run)
                 DRY_RUN=true
+                ;;
+            --no-prune)
+                PRUNE_EMPTY_DIRS=false
                 ;;
             --output-root=*|--report-dir=*|--config=*|-s=*|--source=*|-t=*|--target=*|-o=*)
                 case "$1" in
@@ -334,25 +365,56 @@ main() {
     #                    filters them, but never let one into the library)
     # trailing slash     copy the CONTENTS of the staging tree, not the
     #                    folder itself
-    local tmp transferred tint
+    local tmp transferred rsync_rc=0
     tmp="$(mktemp)"
     printf '' > "$tmp"
 
-    local -a args=( -a --ignore-existing --itemize-changes \
-                    --exclude=desktop.ini --exclude=Thumbs.db )
+    # Dry run: capture the itemize listing (stdout) for the report.
+    # Real run: the per-file itemize lines are written to --log-file and
+    # parsed from there.  Progress reaches the terminal one of two ways:
+    #   * pv installed  -> rsync -av | pv -s <du -sb total> (live rate/ETA
+    #                      bar, stdout discarded; the pipe carries the
+    #                      itemize listing, not payload bytes, so the
+    #                      percentage is not meaningful - see header note)
+    #   * no pv         -> rsync -av --info=progress2 (native percentage)
     if [[ "$DRY_RUN" == true ]]; then
-        args+=( -n )
+        local -a args=( -a --ignore-existing --itemize-changes \
+                        --exclude=desktop.ini --exclude=Thumbs.db -n )
+        echo "sync (dry run): rsync -a --ignore-existing --itemize-changes -n '$SOURCE_DIR/' '$TARGET_DIR/'"
+        set +e
+        rsync "${args[@]}" "$SOURCE_DIR/" "$TARGET_DIR/" > "$tmp" 2>&1
+        rsync_rc=$?
+        set -e
+    elif command -v pv >/dev/null 2>&1; then
+        local -a args=( -a -v --ignore-existing \
+                        --exclude=desktop.ini --exclude=Thumbs.db \
+                        --log-file="$tmp" )
+        local total_size
+        total_size="$(du -sb "$SOURCE_DIR" | awk '{print $1}')"
+        echo "sync: rsync -av --ignore-existing '$SOURCE_DIR/' '$TARGET_DIR/' | pv -s $total_size"
+        set +e
+        rsync "${args[@]}" "$SOURCE_DIR/" "$TARGET_DIR/" | pv -s "$total_size" > /dev/null
+        rsync_rc=${PIPESTATUS[0]}
+        set -e
+    else
+        local -a args=( -a -v --ignore-existing --info=progress2 \
+                        --exclude=desktop.ini --exclude=Thumbs.db \
+                        --log-file="$tmp" )
+        echo "sync: rsync -av --ignore-existing --info=progress2 '$SOURCE_DIR/' '$TARGET_DIR/'"
+        set +e
+        rsync "${args[@]}" "$SOURCE_DIR/" "$TARGET_DIR/"
+        rsync_rc=$?
+        set -e
     fi
 
-    echo "sync: rsync ${args[*]} '$SOURCE_DIR/' '$TARGET_DIR/'"
-    set +e
-    rsync "${args[@]}" "$SOURCE_DIR/" "$TARGET_DIR/" > "$tmp" 2>&1
-    local rsync_rc=$?
-    set -e
-
     # Transferred file rows start with '>' (e.g. ">f+++++++++ rel"); dirs
-    # ("cd+++++++++ rel/") and skipped files are not rows.
-    transferred="$(grep -E '^>' "$tmp" | sed -n 's/^.\{11\} \(.*\)$/\1/p' | grep -v '/$' | grep -v '^$' || true)"
+    # ("cd+++++++++ rel/") and skipped files are not rows.  The log-file
+    # lines carry a "YYYY/MM/DD HH:MM:SS [pid] " prefix; strip it so both
+    # sources parse identically.
+    transferred="$(sed -E 's|^[0-9]{4}/[0-9]{2}/[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} \[[0-9]+\] ||' "$tmp" \
+        | grep -E '^>' \
+        | sed -n 's/^.\{11\} \(.*\)$/\1/p' \
+        | grep -v '/$' | grep -v '^$' || true)"
 
     # ------------------------------------------------------------------
     # 8. Report rows: one per staging file
@@ -390,6 +452,24 @@ main() {
     done < <(find "$SOURCE_DIR" -type f -print0)
 
     rm -f "$tmp"
+
+    # ------------------------------------------------------------------
+    # 9. Prune empty directories from the merged library
+    # ------------------------------------------------------------------
+    # Safety net (possible user intervention): an interrupted rsync run or
+    # a pre-existing empty folder can leave empty directories behind.  Drop
+    # them so the library stays clean.  Deletion only happens on a
+    # successful merge; a dry run merely reports the count.
+    if [[ "$PRUNE_EMPTY_DIRS" == true ]]; then
+        local empties
+        if [[ "$DRY_RUN" == true ]]; then
+            empties="$(find "$TARGET_DIR" -depth -mindepth 1 -type d -empty -print | wc -l | tr -d ' ')"
+            echo "prune (dry run): $empties empty director(ies) would be removed from '$TARGET_DIR'"
+        elif (( rsync_rc == 0 )); then
+            empties="$(find "$TARGET_DIR" -depth -mindepth 1 -type d -empty -print -delete | wc -l | tr -d ' ')"
+            echo "prune: removed $empties empty director(ies) from '$TARGET_DIR'"
+        fi
+    fi
 
     echo ""
     echo "copied: $copied   kept-existing: $kept"
