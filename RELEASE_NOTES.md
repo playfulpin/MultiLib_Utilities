@@ -15,7 +15,7 @@ Books library.
 - `bin/prefix_tree_visualizer.sh` **2.8.1** — Unicode tree renderer
 - `lib/utf8_prefix_generator.awk` **1.1** — original AWK generator (parity reference)
 - `bin/merge_books_into_skeleton.sh` **0.2.0** — merge a legacy archive into an in-memory author-prefix hierarchy (pruned, timestamped `BooksInput_<ts>` staging; no on-disk skeleton)
-- `bin/merge_skeleton_into_books.sh` **0.2.2** — finalize a `BooksInput_*` staging tree into the Books library with rsync (destination wins, live `pv -s` progress bar with `--info=progress2` fallback, empty-dir prune after merge)
+- `bin/merge_skeleton_into_books.sh` **0.2.3** — finalize a `BooksInput_*` staging tree into the Books library with rsync (destination wins, live `pv -l` item-count progress bar with `--info=progress2` fallback, empty-dir prune after merge)
 
 ## Highlights
 

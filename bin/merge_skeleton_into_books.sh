@@ -3,7 +3,7 @@
 ###############################################################################
 # bin/merge_skeleton_into_books.sh
 #
-# Version:       0.2.2
+# Version:       0.2.3
 # Last updated:  2026-09-03
 #
 # -----------------------------------------------------------------------------
@@ -16,17 +16,17 @@
 #   copied file and every kept-existing conflict.
 #
 #   Progress is shown live on the terminal: the real run pipes rsync's
-#   itemize listing through pv -s <total-bytes> (total from du -sb of the
-#   staging tree) for a live rate/ETA bar; the per-file itemize lines are
-#   captured with --log-file for the report, so the screen stays usable
-#   while the report stays exact.  When pv is not installed the run falls
-#   back to rsync's native --info=progress2.
+#   itemize listing through `pv -l -s <item-count>` (items = files + dirs
+#   in the staging tree, via find) for an accurate percentage; the per-file
+#   itemize lines are captured with --log-file for the report, so the
+#   screen stays usable while the report stays exact.  When pv is not
+#   installed the run falls back to rsync's native --info=progress2.
 #
-#   NOTE: rsync streams file payloads over its own channel, so the pipe
-#   carries the itemize listing text, not the payload bytes.  pv therefore
-#   shows a live activity/rate bar whose percentage is not meaningful
-#   against the du -sb total; --info=progress2 (or pv -l with a file
-#   count) is the accurate percentage alternative.
+#   NOTE: pv -l counts listing LINES, one per transferred file and one per
+#   transferred directory (rsync -a lists both), so the count is files+dirs
+#   and a grep filter strips rsync's header/blank/summary lines before pv
+#   so the bar lands at exactly 100%.  rsync streams file payloads over
+#   its own channel, so the pipe never carries the bytes themselves.
 #
 #   After a successful merge the library is pruned of empty directories
 #   (find ... -depth -mindepth 1 -type d -empty -delete) as a safety net for
@@ -173,8 +173,8 @@ usage() {
     echo "  -h, --help             Show this help" >&2
     echo "" >&2
     echo "Sync: rsync -av --ignore-existing (destination wins, nothing is" >&2
-    echo "overwritten); live progress via pv -s when installed, else rsync's" >&2
-    echo "native --info=progress2." >&2
+    echo "overwritten); live progress via pv -l -s <item-count> when installed," >&2
+    echo "else rsync's native --info=progress2." >&2
     echo "After a successful merge, empty directories are pruned from the" >&2
     echo "library.  Requires rsync on PATH." >&2
     echo "" >&2
@@ -389,11 +389,17 @@ main() {
         local -a args=( -a -v --ignore-existing \
                         --exclude=desktop.ini --exclude=Thumbs.db \
                         --log-file="$tmp" )
-        local total_size
-        total_size="$(du -sb "$SOURCE_DIR" | awk '{print $1}')"
-        echo "sync: rsync -av --ignore-existing '$SOURCE_DIR/' '$TARGET_DIR/' | pv -s $total_size"
+        # pv -l counts listing lines (one per transferred file AND one per
+        # transferred dir, rsync -a lists both), so count files+dirs; a grep
+        # filter strips rsync's header/blank/summary lines so the bar lands
+        # at exactly 100%.
+        local total_items
+        total_items="$(find "$SOURCE_DIR" -mindepth 1 \( -type f -o -type d \) -print | wc -l | tr -d ' ')"
+        echo "sync: rsync -av --ignore-existing '$SOURCE_DIR/' '$TARGET_DIR/' | pv -l -s $total_items"
         set +e
-        rsync "${args[@]}" "$SOURCE_DIR/" "$TARGET_DIR/" | pv -s "$total_size" > /dev/null
+        rsync "${args[@]}" "$SOURCE_DIR/" "$TARGET_DIR/" \
+            | grep --line-buffered -v -E '^(sending|receiving) incremental file list$|^created directory |^sent |^total size |^\./$|^$' \
+            | pv -l -s "$total_items" > /dev/null
         rsync_rc=${PIPESTATUS[0]}
         set -e
     else

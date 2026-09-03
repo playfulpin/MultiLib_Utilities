@@ -184,8 +184,8 @@ the copy, resumably and safely, with a **live progress bar** on the
 terminal:
 
 ```bash
-total_size=$(du -sb <BooksInput_ts> | awk '{print $1}')
-rsync -av --ignore-existing <BooksInput_ts>/  <Books>/ | pv -s "$total_size" > /dev/null
+item_count=$(find <BooksInput_ts> -mindepth 1 -type f -o -type d | wc -l)
+rsync -av --ignore-existing <BooksInput_ts>/  <Books>/ | pv -l -s "$item_count" > /dev/null
 ```
 
 The wrapper validates the paths, requires the source to be a `BooksInput_*`
@@ -194,9 +194,11 @@ folder, and writes a per-file TSV report (`copied` / `would-copy` /
 present in the library is never overwritten. The progress bar does not
 interfere with the report: the per-file itemize lines are captured via
 rsync's `--log-file` instead of stdout. When `pv` is not installed the run
-falls back to rsync's native `--info=progress2`; note that the pipe carries
-rsync's itemize listing, not the payload bytes, so pv's percentage is not
-meaningful against the `du -sb` total (it is a live rate/ETA bar).
+falls back to rsync's native `--info=progress2`. `pv -l` counts listing
+lines (one per transferred file and directory), so the count is files+dirs
+and a grep filter strips rsync's header/blank/summary lines before pv so
+the bar lands at exactly 100%; rsync streams payloads over its own
+channel, so the pipe never carries the bytes themselves.
 
 After a successful merge the library is **pruned of empty directories**
 (`find <Books> -depth -mindepth 1 -type d -empty -delete`) as a safety net
@@ -297,7 +299,7 @@ Releases are tagged with a tool-prefixed name:
 | `bin/prefix_tree_visualizer.sh` | 2.8.1 | `v2.8.1` |
 | `bin/build_shell_nested_authors.sh` | 6.6.10 | `v6.6.10` |
 | `bin/merge_books_into_skeleton.sh` | 0.2.0 | `merge_books_into_skeleton-0.2.0` |
-| `bin/merge_skeleton_into_books.sh` | 0.2.2 | `merge_skeleton_into_books-0.2.2` |
+| `bin/merge_skeleton_into_books.sh` | 0.2.3 | `merge_skeleton_into_books-0.2.3` |
 | `lib/utf8_prefix_generator.awk` | 1.1 | `utf8_prefix_generator-1.1` |
 
 `v2.8.1` and `v6.6.8` predate the tool-prefixed convention.

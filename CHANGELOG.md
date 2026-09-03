@@ -59,11 +59,26 @@ All notable changes to the author-toolchain scripts in this repository:
   (total from `du -sb` of the staging tree) with stdout discarded; when
   `pv` is not installed the run falls back to rsync's native
   `--info=progress2`.  The `--log-file` capture is unchanged, so the TSV
-  report stays exact.  Note: rsync streams file payloads over its own
-  channel, so the pipe carries the listing text — pv shows a live rate/ETA
-  bar whose percentage is not meaningful against the `du -sb` total.  CI
-  now installs pv (and rsync) so the merge suite exercises the pv path on
-  GitHub.
+  report stays exact.  CI now installs pv (and rsync) so the merge suite
+  exercises the pv path on GitHub.
+
+- **`bin/merge_skeleton_into_books.sh` v0.2.2 → 0.2.3.**  The progress bar
+  switches from `pv -s <bytes>` to `pv -l -s <item-count>` for an accurate
+  percentage: pv counts listing lines (one per transferred file AND one
+  per transferred directory, since rsync -a lists both), so the count is
+  `find ... \( -type f -o -type d \) | wc -l`; a grep filter strips
+  rsync's header/blank/summary lines before pv so the bar lands at exactly
+  100%.  The `--log-file` capture and the `--info=progress2` fallback are
+  unchanged.
+
+- **First real finalize run (`BooksInput_20260903-140717` → `Books_01`).**
+  Ran `bin/merge_skeleton_into_books.sh --target /mnt/c/Backup_Go7/Books_01
+  --report-dir /mnt/c/Backup_Go7/merge-reports` against the newest staging
+  tree (157 files, ~0.09 GB).  Result: **copied 0, kept-existing 157** —
+  `Books_01` already contained every staged file (it was populated at the
+  same time the staging tree was created), so `--ignore-existing` skipped
+  everything; 0 empty dirs pruned; staging retained; report at
+  `merge-reports/merge_skeleton_into_books_20260903-151230.tsv`.
 
 - **Docs:** `docs/BOOK_LIBRARY_MERGE_PLAN.md` rewritten for the two-step
   pipeline (in-memory merge → rsync finalize); README tool sections, testing
