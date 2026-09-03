@@ -17,6 +17,10 @@
 #                     are kept, staging is retained, the report records both.
 #   * AUTO-DETECT  -- with no --source, the newest BooksInput_* folder under
 #                     --output-root is used.
+#   * PROGRESS     -- the pv -l progress filter (extracted from the script)
+#                     strips rsync's header/blank/summary lines so the line
+#                     tally equals the files+dirs item count (exact 100%),
+#                     with and without a pre-existing destination.
 #   * CLI          -- usage errors, -h/-v, path-safety guards (dangerous
 #                     root, non-BooksInput_* source, target inside source).
 #   * VERSION      -- script carries a 0.2.x header version.
@@ -107,6 +111,52 @@ build_fixture() { # base
 # --- locate the single generated report file in REPORT_DIR ------------------
 report_for() { # report_dir -> prints the file path (or nothing)
     find "$1" -maxdepth 1 -name 'merge_skeleton_into_books_*.tsv' | head -n 1
+}
+
+# The real-run progress pipeline pipes rsync's listing through
+#   grep --line-buffered -v -E '<filter>' | pv -l -s <item-count>
+# The filter regex lives in the script; extract it verbatim so this suite
+# tests the actual implementation and fails loudly if the script line
+# ever changes shape.
+SYNC_FILTER="$(sed -n "s|.*grep --line-buffered -v -E '\([^']*\)'.*|\1|p" "$SCRIPT" | head -n 1)"
+if [[ -z "$SYNC_FILTER" ]]; then
+    echo "ERROR: cannot extract the progress filter regex from $SCRIPT" >&2
+    exit 2
+fi
+
+###############################################################################
+# progress filter: stripped listing must tally exactly files+dirs (100%)
+###############################################################################
+run_progress_tests() {
+    echo "== progress filter (exact 100% tally) =="
+    local base="$TMPDIR/prog"
+    local staging="$base/BooksInput_t1" books="$base/Books"
+    mkdir -p "$staging/d1" "$staging/d2/d3" "$books"
+    for i in $(seq 1 40); do printf 'x\n' > "$staging/d1/f$i.bin"; done
+    for i in $(seq 1 30); do printf 'y\n' > "$staging/d2/d3/g$i.bin"; done
+
+    local items n
+    items="$(find "$staging" -mindepth 1 \( -type f -o -type d \) | wc -l | tr -d ' ')"
+
+    # Destination already exists (the script validates the target upfront),
+    # so rsync emits one line per file/dir plus header/summary noise.
+    n="$(rsync -av "$staging/" "$books/" 2>/dev/null \
+        | grep --line-buffered -v -E "$SYNC_FILTER" | wc -l | tr -d ' ' || true)"
+    if [[ "$n" == "$items" ]]; then
+        report "progress_filter_existing_dst" ok "$n/$items lines"
+    else
+        report "progress_filter_existing_dst" fail "filtered $n lines, expected $items"
+    fi
+
+    # Fresh destination: rsync additionally emits 'created directory' and the
+    # './' root line; the filter must strip those too (worst case).
+    n="$(rsync -av "$staging/" "$base/Books_fresh/" 2>/dev/null \
+        | grep --line-buffered -v -E "$SYNC_FILTER" | wc -l | tr -d ' ' || true)"
+    if [[ "$n" == "$items" ]]; then
+        report "progress_filter_fresh_dst" ok "$n/$items lines"
+    else
+        report "progress_filter_fresh_dst" fail "filtered $n lines, expected $items"
+    fi
 }
 
 ###############################################################################
@@ -308,16 +358,18 @@ run_release_tests() {
 ###############################################################################
 case "${1:-all}" in
     all)    run_dry_tests; run_full_tests; run_auto_detect_tests
-            run_cli_tests; run_release_tests ;;
+            run_progress_tests; run_cli_tests; run_release_tests ;;
     dry)    run_dry_tests ;;
     full)   run_full_tests ;;
     auto)   run_auto_detect_tests ;;
+    progress) run_progress_tests ;;
     cli)    run_cli_tests ;;
     release) run_release_tests ;;
     --list)
         echo "dry:         would-copy/would-keep report, nothing changed"
         echo "full:        rsync copy with --ignore-existing (destination wins)"
         echo "auto:        newest BooksInput_* auto-discovered"
+        echo "progress:    pv -l filter strips header lines -> exact 100% tally"
         echo "cli:         usage errors, -h/-v, path-safety guards"
         echo "release:     0.2.x version header"
         exit 0
