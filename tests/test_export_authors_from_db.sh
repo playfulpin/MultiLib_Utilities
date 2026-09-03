@@ -14,6 +14,11 @@
 #     literal NULL rows are counted and dropped)
 #   - dry-run counts and writes nothing; real runs write the file; stdout
 #     mode; mysql failure is reported and leaves the output untouched
+#   - MariaDB lifecycle (mock tasklist + mock powershell.exe, mirroring the
+#     BookTracker-import MARIA_MOCK_RUNNING pattern): an already-running
+#     server is left untouched, a down server is started and stopped again
+#     on exit, a missing tasklist disables management, and --dry-run only
+#     reports would-start / would-stop
 #   - version header stays in sync with `--version` (1.0.x)
 #
 # Usage:  bash tests/test_export_authors_from_db.sh
@@ -72,9 +77,14 @@ OUT_FILE="$TMPDIR/authors.txt"
 
 run_export() { # [args...] ; stdout->$OUT, stderr->$ERR ; rc->$RC
     OUT="$TMPDIR/stdout.txt" ERR="$TMPDIR/stderr.txt"
+    # Point MARIA_TASKLIST at a nonexistent path by default so lifecycle
+    # management is disabled (the exporter then connects directly); lifecycle
+    # tests below override it with a mock tasklist via MARIA_TASKLIST_OVERRIDE.
     env PATH="$MOCK_BIN:$PATH" \
         MOCK_LOG="$MOCK_LOG" MOCK_ROWS_FILE="$ROWS_FILE" MOCK_RC="${MOCK_RC:-0}" \
         MYSQL_PASSWORD="${MOCK_PASSWORD:-}" \
+        MARIA_TASKLIST="${MARIA_TASKLIST_OVERRIDE:-$TMPDIR/no-such-tasklist}" \
+        MARIA_MOCK_RUNNING="${MARIA_MOCK_RUNNING:-0}" \
         QUERY_FILE="$QUERY_FILE" OUTPUT_FILE="$OUT_FILE" \
         bash "$EXPORTER" "$@" >"$OUT" 2>"$ERR"
     RC=$?
@@ -203,6 +213,71 @@ if (( $? == 1 )) && grep -q "query file not found" "$ERR"; then
     report "missing_query_file" ok
 else
     report "missing_query_file" fail "stderr: $(head -2 "$ERR")"
+fi
+
+# --- MariaDB lifecycle (mock tasklist + mock powershell.exe) ------------------
+cat > "$MOCK_BIN/tasklist" <<'TASKLIST_EOF'
+#!/usr/bin/env bash
+if [[ "${MARIA_MOCK_RUNNING:-0}" == "1" ]]; then
+    printf 'mysqld.exe                   26464 Console                    1    123,456 K\n'
+fi
+exit 0
+TASKLIST_EOF
+cat > "$MOCK_BIN/powershell.exe" <<'PS_EOF'
+#!/usr/bin/env bash
+printf 'PS %s\n' "$*" >> "${MOCK_LOG:-/dev/null}"
+exit 0
+PS_EOF
+chmod +x "$MOCK_BIN/tasklist" "$MOCK_BIN/powershell.exe"
+
+echo "== MariaDB lifecycle =="
+
+# 1) server already running -> exporter connects and leaves it untouched
+rm -f "$OUT_FILE" "$MOCK_LOG"
+MARIA_TASKLIST_OVERRIDE="$MOCK_BIN/tasklist" MARIA_MOCK_RUNNING=1 MOCK_RC=0 run_export -o "$OUT_FILE"
+if (( RC == 0 )) && grep -q "already running" "$ERR" \
+   && ! grep -q "stopping MariaDB" "$ERR" \
+   && grep -q '^Джо Аберкромби$' "$OUT_FILE"; then
+    report "lifecycle_already_running_untouched" ok
+else
+    report "lifecycle_already_running_untouched" fail "rc=$RC stderr=$(head -3 "$ERR")"
+fi
+
+# 2) server down -> started (elevated PS), queried, stopped gracefully on exit
+rm -f "$OUT_FILE" "$MOCK_LOG"
+MARIA_TASKLIST_OVERRIDE="$MOCK_BIN/tasklist" MARIA_MOCK_RUNNING=0 MOCK_RC=0 run_export -o "$OUT_FILE"
+if (( RC == 0 )) \
+   && grep -q "starting MariaDB" "$ERR" \
+   && grep -q "MariaDB ready" "$ERR" \
+   && grep -q "stopping MariaDB (graceful shutdown)" "$ERR" \
+   && grep -q "MariaDB stopped" "$ERR" \
+   && grep -q "Start-Process" "$MOCK_LOG" \
+   && grep -q '^Азимов Айзек$' "$OUT_FILE"; then
+    report "lifecycle_start_query_stop" ok
+else
+    report "lifecycle_start_query_stop" fail "rc=$RC stderr=$(head -4 "$ERR") pslog=$(cat "$MOCK_LOG")"
+fi
+
+# 3) no tasklist interop -> management disabled, exporter connects directly
+rm -f "$OUT_FILE" "$MOCK_LOG"
+MARIA_TASKLIST_OVERRIDE="$TMPDIR/no-such-tasklist" MOCK_RC=0 run_export -o "$OUT_FILE"
+if (( RC == 0 )) && grep -q "tasklist not available" "$ERR" \
+   && ! grep -q "starting MariaDB" "$ERR" \
+   && grep -q '^Абби Линн$' "$OUT_FILE"; then
+    report "lifecycle_no_tasklist_disables_mgmt" ok
+else
+    report "lifecycle_no_tasklist_disables_mgmt" fail "rc=$RC stderr=$(head -3 "$ERR")"
+fi
+
+# 4) dry-run reports would-start / would-stop but never touches the server
+rm -f "$OUT_FILE" "$MOCK_LOG"
+MARIA_TASKLIST_OVERRIDE="$MOCK_BIN/tasklist" MARIA_MOCK_RUNNING=0 MOCK_RC=0 run_export --dry-run
+if (( RC == 0 )) && grep -q "\\[dry-run\\] would start MariaDB" "$ERR" \
+   && grep -q "\\[dry-run\\] would stop MariaDB" "$ERR" \
+   && ! grep -q "Start-Process" "$MOCK_LOG"; then
+    report "lifecycle_dryrun_reports_only" ok
+else
+    report "lifecycle_dryrun_reports_only" fail "rc=$RC stderr=$(head -4 "$ERR") pslog=$(cat "$MOCK_LOG")"
 fi
 
 echo ""

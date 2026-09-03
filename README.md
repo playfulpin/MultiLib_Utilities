@@ -326,7 +326,7 @@ Releases are tagged with a tool-prefixed name:
 | `bin/build_shell_nested_authors.sh` | 6.6.10 | `v6.6.10` |
 | `bin/merge_books_into_skeleton.sh` | 0.2.0 | `merge_books_into_skeleton-0.2.0` |
 | `bin/merge_skeleton_into_books.sh` | 0.2.3 | `merge_skeleton_into_books-0.2.3` |
-| `bin/export_authors_from_db.sh` | 1.0.0 | `export_authors_from_db-1.0.0` |
+| `bin/export_authors_from_db.sh` | 1.0.1 | `export_authors_from_db-1.0.1` |
 | `lib/utf8_prefix_generator.awk` | 1.1 | `utf8_prefix_generator-1.1` |
 
 `v2.8.1` and `v6.6.8` predate the tool-prefixed convention.

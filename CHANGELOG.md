@@ -45,10 +45,28 @@ All notable changes to the author-toolchain scripts in this repository:
   ("бен-Маймон Моше", "клевчук", "фон Беренготт Лючия"), and CJK
   `我` ("我吃西红柿 .").  Existing roots grow too (Ё 1->3, Й 5->14,
   Э 71->172); Ъ/Ы/Ь remain impossible initials (0 in both lists).
-- **New mock suite `tests/test_export_authors_from_db.sh` (14 checks, runs
-  anywhere, no DB needed)**: asserts the connection argv (password never on
-  the command line, `SET NAMES` init-command), row normalization, NULL-row
-  drop, dry-run/stderr/stdout modes, and failure handling.  CI runs it.
+- **MariaDB lifecycle in the exporter (`bin/export_authors_from_db.sh`
+  v1.0.0 → 1.0.1).**  The tool no longer requires a manually started
+  server: mirroring `bin/booktracker-ingest.sh` from BookTracker-import, it
+  checks `mysqld.exe` via the Windows `tasklist` interop and, when the
+  server is down, starts it with an elevated PowerShell `Start-Process`,
+  waits up to `MARIA_START_TIMEOUT` for it to answer, and stops it again on
+  exit with a graceful `SHUTDOWN` (taskkill fallback) — but only when it
+  was this script that started it; a server that was already running is
+  left untouched.  `--dry-run` never starts or stops the server (it logs
+  would-start / would-stop).  When the `tasklist` interop is unavailable
+  (e.g. plain Linux CI) lifecycle management degrades to connect-directly.
+  New env vars with BookTracker-import defaults: `MARIA_TASKLIST`,
+  `MARIA_TASKKILL`, `MARIA_EXE`, `MARIA_BIN_DIR`, `MARIA_START_TIMEOUT`,
+  `MARIA_READY_TIMEOUT`, `MARIA_STOP_TIMEOUT`.
+- **New mock suite `tests/test_export_authors_from_db.sh` grown to 18
+  checks (runs anywhere, no DB needed)**: asserts the connection argv
+  (password never on the command line, `SET NAMES` init-command), row
+  normalization, NULL-row drop, dry-run/stderr/stdout modes, failure
+  handling, and — via a mock `tasklist` + mock `powershell.exe` — the
+  MariaDB lifecycle: already-running server left untouched, full
+  start → ready → graceful-stop cycle, no-tasklist management disable,
+  and dry-run reporting only.  CI runs it.
 - **Byte-order detector fix in two suites.**  `byte_order_violations()` used
   a bare gawk `>=`, which coerces numeric-looking prefixes ("100", "100 ")
   to numbers and both false-flagged valid tables and could mask real
