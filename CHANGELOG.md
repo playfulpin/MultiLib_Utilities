@@ -35,6 +35,17 @@ All notable changes to the author-toolchain scripts in this repository:
   ~7,327 genuinely added; ~3,150 of the raw "losses" were just
   trailing-space artifacts of the old CONCAT.  All toolchain suites green
   on the new list.
+- **Working fixture is now genre-scoped (5,707 authors).**  On 2026-09-03
+  the fixture was re-generated from the corrected
+  `data/sql/qry_Фантастика_4-and-5.sql` (authors of the Фантастика genre
+  family rated 4/5, `TotalCount >= 10` / `NormalCount > 6`).  The
+  originally committed query was an Access-export artifact (square-bracket
+  `[Books]` syntax, tables absent from `flibusta`, book rows instead of
+  author names) and is replaced by a faithful `ml*`-schema translation of
+  its intent (`ParentCode = "0.17"` -> every genre whose `parentgenreid`
+  is the root `Фантастика`); the Access original stays in git history.
+  The list remains regenerable at any time via `bin/export_authors_from_db.sh`
+  (which now auto-starts/stops MariaDB).
 - **Prefix-table roots grow 24 -> 33 first characters.**  Regenerated
   from the new fixture, `bin/build_prefix_table.sh` emits 17,670 rows
   (old list: 10,151, matching the historical record) with no root present
