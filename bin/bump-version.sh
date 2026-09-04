@@ -3,8 +3,8 @@
 ###############################################################################
 # bin/bump-version.sh
 #
-# Version:       1.0.0
-# Last updated:  2026-09-01 14:40
+# Version:       1.0.1
+# Last updated:  2026-09-03 23:50
 #
 # -----------------------------------------------------------------------------
 # PURPOSE
@@ -39,8 +39,8 @@
 #       merge_skeleton_into_books     (0.1.x)
 #       utf8_prefix_generator         (1.x, two-part versions only)
 #       export_authors_from_db        (1.0.x)
-#        reconcile_library             (1.0.x)
-        estimate_download_size        (1.0.x)
+#       reconcile_library             (1.0.x)
+#       estimate_download_size        (1.0.x)
 #
 #   <new_version> must be strictly greater than the current version and match
 #   the tool's version shape (X.Y.Z for shell tools, X.Y for the AWK tool).

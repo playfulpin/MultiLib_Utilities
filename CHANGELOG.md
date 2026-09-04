@@ -9,6 +9,13 @@ All notable changes to the author-toolchain scripts in this repository:
 
 ## [Unreleased]
 
+- **`bin/bump-version.sh` 1.0.0 -> 1.0.1: fix a comment that broke shell
+  syntax.**  The registry entry for the new `estimate_download_size` tool
+  was pasted into the header usage block without its `#` prefix, so
+  `bash -n bin/bump-version.sh` (and the CI Shell-syntax step) failed on
+  the line `estimate_download_size (1.0.x)`.  The block is commented and
+  aligned again; bump-version.sh is not itself version-synced (it has no
+  README/RELEASE_NOTES row), so the header bump is standalone.
 - **New `bin/estimate_download_size.sh` v1.0.0 — catalog download-size
   estimate for the next collecting round.**  Given a to-collect author list
   (one canonical name per line — e.g. the reconcile shopping-list export
