@@ -9,6 +9,47 @@ All notable changes to the author-toolchain scripts in this repository:
 
 ## [Unreleased]
 
+- **New `bin/estimate_download_size.sh` v1.0.0 — catalog download-size
+  estimate for the next collecting round.**  Given a to-collect author list
+  (one canonical name per line — e.g. the reconcile shopping-list export
+  `reconcile_to_collect_<ts>.txt`, or the recommended-author fixture
+  `data/fixtures/authors_list_from_db.txt`), it sums the REAL per-book
+  sizes the catalog stores (`mlbook.filesize`) and reports two
+  **distinct-book totals** — a co-authored book counts once even when
+  several list authors wrote it, so the totals are the honest "how much
+  will I download" figures: the **qualifying** subset (Russian books
+  rated 4/5 in the `Фантастика` genre family, the list's own criteria:
+  40,535 books / ~61 GB for the 5,663-author round) and the **full
+  oeuvre** (all Russian books by those authors: 234,388 books / ~432 GB).
+  List names are resolved to catalog authorids via an `mlauthorname` dump
+  with the same trailing-whitespace normalization the exporter applies
+  (5,663/5,663 matched; unmatched names are counted and reported), and
+  the aggregates restrict with the resulting integer IN-list — fast, and
+  no SQL-escaping of names ever happens.  Every run also writes a
+  per-author breakdown TSV next to the summary
+  (`estimate_download_size_<ts>.tsv`, columns
+  `author|qualifying_books|qualifying_bytes|5rated_books|avg_rating|full_books|full_bytes`)
+  sorted **top-rated first** (5-rated qualifying books desc, then
+  qualifying count desc) with the top 10 printed in the summary
+  (Шекли, Брэдбери, Саймак, Азимов, Лем...), so the round can be
+  prioritized author by author; per-author rows attribute co-authored
+  books to each author, so their sums exceed the distinct-book totals by
+  exactly the multi-author overlap.  The MariaDB lifecycle and `MYSQL_*`
+  client settings are shared via `lib/mariadb_lifecycle.sh` (auto-start
+  when down, graceful stop on exit when this script started it;
+  `--dry-run` never starts or stops the server and writes no breakdown
+  file).  Config `config/estimate_download_size.conf` (flag > env >
+  config > default); registered in the version-sync machinery and CI.
+  New mock-mysql suite `tests/test_estimate_download_size.sh` (runs
+  anywhere, 21/21 checks): argv/password contract, all five query shapes
+  dispatched by stdin, name→authorid resolution into the IN-list,
+  unmatched-author count, summary totals, top-rated-first breakdown
+  content, dry-run / failure / missing-input handling, and the lifecycle
+  mocks.  **Correction vs the earlier ad-hoc estimate:** the previously
+  reported ~181 GB / ~562 GB figures matched no correct query — they came
+  from a scratch join whose byte sums were wrong and which counted
+  co-authored books once per author; the verified numbers are ~61 GB
+  qualifying / ~432 GB full (distinct books).
 - **`bin/reconcile_library.sh` v1.0.2 → 1.0.3 — beyond-books review export.
   In DB mode every run now also writes `reconcile_beyond_books_<ts>.tsv`
   next to the TSV report: every on-disk file attributed to a beyond-list

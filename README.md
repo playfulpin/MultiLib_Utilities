@@ -49,8 +49,9 @@ in the byte-sorted list (`end` is inclusive, so `count == end - start + 1`).
 - **`rsync`** — required by the finalize step
   (`bin/merge_skeleton_into_books.sh`). WSL and Ubuntu CI runners ship it.
 - **A `mysql`/`mariadb` client (optional)** — only needed to regenerate the
-  author list with `bin/export_authors_from_db.sh`. The prefix/merge tools
-  themselves never touch the database.
+  author list with `bin/export_authors_from_db.sh` and to size the next
+  collecting round with `bin/estimate_download_size.sh`. The prefix/merge
+  tools themselves never touch the database.
 
 ## The author list
 
@@ -303,6 +304,49 @@ Options: `-l/--library-root`, `-s/--scope-file`, `-r/--report-dir`,
 Defaults live in `config/reconcile_library.conf`; the MariaDB lifecycle and
 `MYSQL_*` client settings are shared via `lib/mariadb_lifecycle.sh`.
 
+### `bin/estimate_download_size.sh`
+
+Estimates the download size of the next collecting round **straight from the
+catalog, before anything is downloaded**.  The input is a to-collect author
+list (one canonical name per line — e.g. the reconcile shopping-list export
+`reconcile_to_collect_<ts>.txt`, or the recommended-author fixture); the
+tool sums the real per-book sizes the catalog stores (`mlbook.filesize`)
+through the same `mlauthorname -> mlauthor -> mlbook` linkage and
+whitespace normalization the exporter uses, so a list exported from the
+catalog matches 1:1 (list names are resolved to catalog authorids via an
+mlauthorname dump and the aggregates run on the resulting integer
+IN-list).  Two **distinct-book** totals are reported — a co-authored book
+counts once even when several list authors wrote it, so these are the
+honest "how much will I download" figures:
+
+- **qualifying** — Russian books rated 4/5 in the `Фантастика` genre family
+  (the list's own criteria; ~61 GB for the 5,663-author to-collect round),
+- **full oeuvre** — ALL Russian books by those authors, rated or not
+  (~432 GB for the same round).
+
+```bash
+./bin/estimate_download_size.sh                                          # the recommended-author fixture
+./bin/estimate_download_size.sh -i <merge-reports>/reconcile_to_collect_20260903-212501.txt
+./bin/estimate_download_size.sh --dry-run                                # summarize, write nothing
+```
+
+Every run also writes a **per-author breakdown TSV** next to the summary,
+sorted **top-rated first** (5-rated qualifying books desc, then qualifying
+count desc) so the round can be prioritized author by author:
+`estimate_download_size_<ts>.tsv` with columns
+`author | qualifying_books | qualifying_bytes | 5rated_books | avg_rating |
+full_books | full_bytes`; the top 10 of that order are printed in the
+summary.  Per-author rows attribute co-authored books to each author, so
+their sums exceed the distinct-book totals by exactly the multi-author
+overlap.  The MariaDB lifecycle and `MYSQL_*` settings are shared via
+`lib/mariadb_lifecycle.sh` (auto-start when down, graceful stop on exit
+when this script started it; `--dry-run` never starts or stops the server
+and writes no breakdown file).
+
+Options: `-i/--input-file`, `-o/--output`, `-r/--report-dir`,
+`-n/--dry-run`, `-d/--debug`, `-v/--version`, `-h/--help`.  Defaults live
+in `config/estimate_download_size.conf`.
+
 ## Testing
 
 Each tool has a self-contained regression suite, plus one end-to-end suite that
@@ -318,6 +362,7 @@ wsl.exe bash tests/test_merge_books_into_skeleton.sh # archive -> in-memory pref
 wsl.exe bash tests/test_merge_skeleton_into_books.sh # BooksInput_* -> Books rsync finalize (WSL/Linux + rsync)
 bash tests/test_export_authors_from_db.sh            # exporter: argv, rows, lifecycle mocks (runs anywhere)
 bash tests/test_reconcile_library.sh                 # recon: classification + collection-progress summary (mock mysql)
+bash tests/test_estimate_download_size.sh            # estimator: sums, top-rated-first breakdown, lifecycle mocks (runs anywhere)
 bash tests/test_version_sync.sh                      # version locations agree (runs anywhere)
 ```
 
@@ -337,7 +382,7 @@ edits all four in one shot, so use it for every bump:
 ## Continuous integration
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on every push/PR: shell
-syntax check across `bin/` and `lib/`, the version-sync suite, and all nine
+syntax check across `bin/` and `lib/`, the version-sync suite, and all ten
 tool suites on `ubuntu-latest`. Linux bash is multibyte-capable, so the
 WSL-only constraint of the UTF-8 suites does not block CI; the finalize suite
 needs rsync (present on the runners) and the rest run anywhere. This is what
@@ -362,6 +407,7 @@ Releases are tagged with a tool-prefixed name:
 | `bin/merge_skeleton_into_books.sh` | 0.2.3 | `merge_skeleton_into_books-0.2.3` |
 | `bin/export_authors_from_db.sh` | 1.0.2 | `export_authors_from_db-1.0.2` |
 | `bin/reconcile_library.sh` | 1.0.3 | `reconcile_library-1.0.3` |
+| `bin/estimate_download_size.sh` | 1.0.0 | `estimate_download_size-1.0.0` |
 | `lib/utf8_prefix_generator.awk` | 1.1 | `utf8_prefix_generator-1.1` |
 
 `v2.8.1` and `v6.6.8` predate the tool-prefixed convention.
@@ -392,6 +438,7 @@ bin/prefix_tree_visualizer.sh       prefix-tree renderer
 bin/build_shell_nested_authors.sh   nested-directory builder
 bin/export_authors_from_db.sh       regenerate the author list from the DB
 bin/reconcile_library.sh            personal-catalog collection-progress report
+bin/estimate_download_size.sh       catalog download-size estimate for a to-collect round
 bin/bump-version.sh                 bump one tool's version across header + docs
 bin/merge_books_into_skeleton.sh    archive -> in-memory prefix merge tool (BooksInput_<ts> out)
 bin/merge_skeleton_into_books.sh    BooksInput_* -> Books rsync finalize tool
@@ -401,6 +448,7 @@ lib/utf8_prefix_generator.awk       original AWK generator (parity reference)
 config/merge_books.conf             defaults for the merge tool (input file, paths, tree knobs)
 config/merge_skeleton_into_books.conf   defaults for the finalize tool (paths + discovery root)
 config/reconcile_library.conf       defaults for the recon report (library root, scope, report dir)
+config/estimate_download_size.conf  defaults for the estimator (input list, report dir)
 
 tests/test_*.sh                 regression suites (one per tool + e2e + version sync)
 tests/                          fixtures and golden files

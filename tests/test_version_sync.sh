@@ -155,6 +155,9 @@ check_tool export_authors_from_db \
 check_tool reconcile_library \
     "bin/reconcile_library.sh" "" "bin/reconcile_library.sh"
 
+check_tool estimate_download_size \
+    "bin/estimate_download_size.sh" "" "bin/estimate_download_size.sh"
+
 # --- summary --------------------------------------------------------------------
 echo
 echo "=============================="
