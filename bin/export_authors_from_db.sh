@@ -3,7 +3,7 @@
 ###############################################################################
 # bin/export_authors_from_db.sh
 #
-# Version:       1.0.1
+# Version:       1.0.2
 # Last updated:  2026-09-03
 #
 # -----------------------------------------------------------------------------
@@ -91,20 +91,8 @@ MYSQL_PASSWORD="${MYSQL_PASSWORD:-}"
 MYSQL_DATABASE="${MYSQL_DATABASE:-flibusta}"
 MYSQL_EXTRA_ARGS="${MYSQL_EXTRA_ARGS:---default-character-set=utf8}"
 
-# --- MariaDB lifecycle (same defaults as BookTracker-import config.sh) --------
-# The portable MariaDB runs on the Windows host; WSL2 talks to it over TCP.
-# When it is not running the exporter starts it (elevated PowerShell, exactly
-# like bin/booktracker-ingest.sh) and - because it started it - stops it on
-# exit.  A server that was already running is left untouched.
-MARIA_TASKLIST="${MARIA_TASKLIST:-/mnt/c/Windows/System32/tasklist.exe}"
-MARIA_TASKKILL="${MARIA_TASKKILL:-/mnt/c/Windows/System32/taskkill.exe}"
-MARIA_EXE="${MARIA_EXE:-C:\\mariadb-10.4.7-winx64\\bin\\mysqld.exe}"
-MARIA_BIN_DIR="${MARIA_BIN_DIR:-C:\\mariadb-10.4.7-winx64\\bin}"
-MARIA_START_TIMEOUT="${MARIA_START_TIMEOUT:-30}"
-MARIA_READY_TIMEOUT="${MARIA_READY_TIMEOUT:-5}"
-MARIA_STOP_TIMEOUT="${MARIA_STOP_TIMEOUT:-15}"
-MARIA_MANAGE_OFF=0
-_EXPORT_STARTED_MARIADB=0
+# MariaDB lifecycle settings and functions come from the shared
+# lib/mariadb_lifecycle.sh (sourced below).
 
 QUERY_FILE="${QUERY_FILE:-$PROJECT_ROOT/data/sql/qry_authors_4_and_5_all.sql}"
 OUTPUT_FILE="${OUTPUT_FILE:-$PROJECT_ROOT/data/fixtures/authors_list_from_db.txt}"
@@ -115,145 +103,16 @@ log()  { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 debug() { if (( DEBUG )); then log "debug: $*"; fi; }
 die()  { log "error: $*"; exit 1; }
 
-# --- MariaDB lifecycle (mirrors BookTracker-import ingest functions) ----------
-
-# Return 0 when mysqld.exe is visible via the Windows tasklist interop.
-# When the interop binary is unavailable (e.g. plain Linux), lifecycle
-# management is disabled and the exporter simply connects directly.
-mariadb_running() {
-    local tl="$MARIA_TASKLIST"
-    if [[ ! -x "$tl" ]]; then
-        log "warn : tasklist not available: $tl"
-        MARIA_MANAGE_OFF=1
-        return 1
-    fi
-    if "$tl" | grep -qi 'mysqld\.exe'; then
-        return 0
-    fi
-    return 1
-}
-
-# Return 0 when the server actually answers a query.  The elevated
-# Start-Process can be slow or the UAC prompt can sit unaccepted, so process
-# presence is not enough.  The probe is bounded: under WSL2 mirrored
-# networking a connect to an unbound port can hang instead of refusing.
-mariadb_ready() {
-    local probe_timeout="$MARIA_READY_TIMEOUT"
-    local -a cmd=()
-    if command -v timeout >/dev/null 2>&1; then
-        cmd=(timeout "$probe_timeout")
-    fi
-    cmd+=("$MYSQL_CLIENT")
-    [[ -n "${MYSQL_HOST:-}" ]] && cmd+=(-h "$MYSQL_HOST" --protocol=TCP)
-    [[ -n "${MYSQL_PORT:-}" ]] && cmd+=(-P "$MYSQL_PORT")
-    [[ -n "${MYSQL_USER:-}" ]] && cmd+=(-u "$MYSQL_USER")
-    if [[ -n "${MYSQL_PASSWORD:-}" ]]; then
-        MYSQL_PWD="$MYSQL_PASSWORD" "${cmd[@]}" -e "SELECT 1" >/dev/null 2>&1
-    else
-        "${cmd[@]}" -e "SELECT 1" >/dev/null 2>&1
-    fi
-}
-
-# Start the portable MariaDB via an elevated PowerShell process.  Sets the
-# guard so mariadb_stop knows it was this script that launched the server.
-# Returns 1 when the server does not answer within MARIA_START_TIMEOUT.
-mariadb_start() {
-    local exe="$MARIA_EXE" dir="$MARIA_BIN_DIR" timeout="$MARIA_START_TIMEOUT" deadline
-    if (( DRY_RUN )); then
-        log "info : [dry-run] would start MariaDB: $exe --console"
-        _EXPORT_STARTED_MARIADB=1
-        return 0
-    fi
-    log "info : starting MariaDB (expect an elevated PowerShell window)"
-    if ! command -v powershell.exe >/dev/null 2>&1; then
-        log "error: powershell.exe not found; cannot start MariaDB (start it manually)"
-        return 1
-    fi
-    if ! powershell.exe -NoProfile -Command \
-        "Start-Process '$exe' -ArgumentList '--console' -WorkingDirectory '$dir' -Verb RunAs"; then
-        log "error: failed to start MariaDB (Start-Process returned an error)"
-        return 1
-    fi
-    _EXPORT_STARTED_MARIADB=1
-    log "info : MariaDB start command issued; waiting for the server to answer..."
-    deadline=$(( $(date +%s) + timeout ))
-    while (( $(date +%s) < deadline )); do
-        if mariadb_ready; then
-            log "info : MariaDB ready"
-            return 0
-        fi
-        sleep 1
-    done
-    log "error: MariaDB did not become ready within ${timeout}s (accept the UAC prompt or run WSL2 elevated)"
-    _EXPORT_STARTED_MARIADB=0
-    return 1
-}
-
-# Ask the running server to shut down cleanly (flushes MyISAM buffers, so the
-# ml* tables are not left marked as crashed by a hard taskkill).
-mariadb_shutdown() {
-    local -a cmd=("$MYSQL_CLIENT")
-    [[ -n "${MYSQL_HOST:-}" ]] && cmd+=(-h "$MYSQL_HOST" --protocol=TCP)
-    [[ -n "${MYSQL_PORT:-}" ]] && cmd+=(-P "$MYSQL_PORT")
-    [[ -n "${MYSQL_USER:-}" ]] && cmd+=(-u "$MYSQL_USER")
-    if [[ -n "${MYSQL_PASSWORD:-}" ]]; then
-        MYSQL_PWD="$MYSQL_PASSWORD" "${cmd[@]}" -e "SHUTDOWN" >/dev/null 2>&1
-    else
-        "${cmd[@]}" -e "SHUTDOWN" >/dev/null 2>&1
-    fi
-}
-
-# Stop MariaDB when this script launched it (guard set): graceful SHUTDOWN
-# first, wait up to MARIA_STOP_TIMEOUT for mysqld to exit, then taskkill /F.
-# A no-op otherwise, so it is safe to call from the EXIT trap on every path.
-mariadb_stop() {
-    if (( MARIA_MANAGE_OFF )) || [[ "$_EXPORT_STARTED_MARIADB" != 1 ]]; then
-        return 0
-    fi
-    if (( DRY_RUN )); then
-        log "info : [dry-run] would stop MariaDB"
-        _EXPORT_STARTED_MARIADB=0
-        return 0
-    fi
-    log "info : stopping MariaDB (graceful shutdown)"
-    local waited=0 timeout="$MARIA_STOP_TIMEOUT" client_pid
-    mariadb_shutdown &
-    client_pid=$!
-    while (( waited < timeout )); do
-        sleep 1
-        if ! mariadb_running; then
-            kill "$client_pid" 2>/dev/null || true
-            wait "$client_pid" 2>/dev/null || true
-            log "info : MariaDB stopped"
-            _EXPORT_STARTED_MARIADB=0
-            return 0
-        fi
-        waited=$((waited + 1))
-    done
-    kill "$client_pid" 2>/dev/null || true
-    wait "$client_pid" 2>/dev/null || true
-    log "warn : mysqld.exe still running after ${timeout}s; force-killing"
-    local tk="$MARIA_TASKKILL"
-    if [[ ! -x "$tk" ]]; then
-        log "warn : taskkill not available: $tk"
-        _EXPORT_STARTED_MARIADB=0
-        return 0
-    fi
-    if "$tk" /F /IM mysqld.exe >/dev/null 2>&1; then
-        log "info : MariaDB stopped (forced)"
-    else
-        log "warn : taskkill may not have stopped MariaDB (already exited?)"
-    fi
-    _EXPORT_STARTED_MARIADB=0
-    return 0
-}
+# --- shared MariaDB lifecycle (lib/mariadb_lifecycle.sh) -----------------------
+# shellcheck source=../lib/mariadb_lifecycle.sh
+source "$PROJECT_ROOT/lib/mariadb_lifecycle.sh"
 
 # EXIT trap: remove temp files and stop MariaDB only if this script started it.
 cleanup() {
     [[ -n "${tmp_out:-}" ]] && rm -f "$tmp_out"
     [[ -n "${tmp_err:-}" ]] && rm -f "$tmp_err"
     [[ -n "${tmp_clean:-}" ]] && rm -f "$tmp_clean"
-    mariadb_stop
+    mariadb_stop_if_started
     return 0
 }
 trap cleanup EXIT
@@ -314,17 +173,8 @@ if ! command -v "${MYSQL_CLIENT:-mysql}" >/dev/null 2>&1; then
 fi
 
 # --- MariaDB lifecycle: start when down, stop on exit when we started it -------
-if (( DRY_RUN )); then
-    mariadb_start
-elif mariadb_running; then
-    log "info : MariaDB already running; leaving it untouched"
-else
-    if (( MARIA_MANAGE_OFF )); then
-        log "info : MariaDB lifecycle management unavailable (no tasklist); connecting directly"
-    else
-        mariadb_start || die "cannot start MariaDB (accept the UAC prompt or run WSL2 elevated, or start the server manually)"
-    fi
-fi
+mariadb_maybe_start \
+    || die "cannot start MariaDB (accept the UAC prompt or run WSL2 elevated, or start the server manually)"
 
 # --- build the client argv (password never included) --------------------------
 mysql_args=("${MYSQL_CLIENT:-mysql}")

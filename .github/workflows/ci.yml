@@ -35,6 +35,7 @@ jobs:
           bash tests/test_merge_books_into_skeleton.sh
           bash tests/test_merge_skeleton_into_books.sh
           bash tests/test_export_authors_from_db.sh
+          bash tests/test_reconcile_library.sh
 
       - name: UTF-8 suites (WSL-style, multibyte bash)
         run: |

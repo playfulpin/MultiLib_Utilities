@@ -152,6 +152,9 @@ check_tool utf8_prefix_generator \
 check_tool export_authors_from_db \
     "bin/export_authors_from_db.sh" "" "bin/export_authors_from_db.sh"
 
+check_tool reconcile_library \
+    "bin/reconcile_library.sh" "" "bin/reconcile_library.sh"
+
 # --- summary --------------------------------------------------------------------
 echo
 echo "=============================="

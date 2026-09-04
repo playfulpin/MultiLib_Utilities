@@ -9,6 +9,41 @@ All notable changes to the author-toolchain scripts in this repository:
 
 ## [Unreleased]
 
+- **New `bin/reconcile_library.sh` v1.0.0 — catalog vs library reconciliation
+  report.**  Compares the on-disk book library (default
+  `/mnt/c/Backup_Go7/Books`) against the catalog author scope the merge
+  pipeline was built from (default
+  `data/fixtures/authors_list_from_db.txt`) and classifies every author:
+  `matched` (in scope + on disk), `missing` (in scope, no folder),
+  `empty` (folder present, zero files), `orphan-known` / `orphan-unknown`
+  (on disk but outside the scope).  The disk walk handles BOTH library
+  layouts the pipeline produces — the flat `<letter>/<author>[/series]`
+  and the nested skeleton `<letter>/<prefix>/.../<author>[/series]` — by
+  recognizing author folders **by name** (a folder is an author folder iff
+  its basename matches a known author name from scope ∪ catalog) at any
+  depth, attributing every file to its nearest ancestor author folder, so
+  structural prefix dirs are never mistaken for authors and authors nested
+  under prefixes are found (verified against the real `Books` root:
+  `А/Аб/Абр/Абра/Абрамов Александр` at depth 5).  With the catalog
+  reachable (default) it pulls the `mlauthorname.FullName` snapshot so
+  each row carries the catalog book count next to the on-disk file count;
+  `--no-db` skips the pull and assumes the flat layout (without the name
+  set a nested skeleton cannot be told from series dirs).  desktop.ini
+  never counts as a book file.  Read-only against the library; output is
+  a summary plus one per-run TSV report in the report dir (default
+  `/mnt/c/Backup_Go7/merge-reports`).  Config `config/reconcile_library.conf`
+  (flag > env > config > default); registered in the version-sync
+  machinery and CI (mock-mysql suite, 16 checks, runs anywhere).
+- **Shared `lib/mariadb_lifecycle.sh` v1.0.0.**  The MariaDB lifecycle
+  (tasklist interop check, elevated PowerShell start, bounded readiness
+  probe, graceful SHUTDOWN / taskkill stop, already-running servers left
+  untouched) is extracted from `bin/export_authors_from_db.sh` into a
+  shared library sourced by every DB tool; the exporter now sources it
+  (`bin/export_authors_from_db.sh` v1.0.1 → 1.0.2, behavior unchanged).
+  The shared library also owns the `MYSQL_*` client defaults (host/port/
+  user/db over TCP), fixing DB-mode in the new recon tool, whose own
+  defaults previously left it probing the local socket instead of the
+  Windows-side server.
 - **CI: bump `actions/checkout` v4 -> v5.**  GitHub is deprecating
   Node.js 20, which forced the v4 action onto Node.js 24 with an
   annotation warning; v5 runs on a supported runtime and silences it.
