@@ -347,6 +347,35 @@ Options: `-i/--input-file`, `-o/--output`, `-r/--report-dir`,
 `-n/--dry-run`, `-d/--debug`, `-v/--version`, `-h/--help`.  Defaults live
 in `config/estimate_download_size.conf`.
 
+### `bin/backup_privetelib.sh`
+
+Backup / restore of the **app-registered personal library database
+(`privetelib`)** — the sibling library the MultiLib desktop app created
+(same 17-table ml* schema as `flibusta`, empty, connectable from the app).
+This is the safety net that must exist BEFORE anything is populated into
+`privetelib` (see `docs/REPRESENTATION_PLAN.md`):
+
+```bash
+./bin/backup_privetelib.sh                              # backup (default action)
+./bin/backup_privetelib.sh list                         # list backups newest first
+./bin/backup_privetelib.sh verify <file>.sql.gz         # integrity-check a backup
+./bin/backup_privetelib.sh restore <file>.sql.gz        # restore over the library
+./bin/backup_privetelib.sh --dry-run restore <file>.sql.gz   # report only
+```
+
+`backup` dumps the library DB with `mysqldump` and gzips it into
+`BACKUP_DIR` as `<db>_<timestamp>.sql.gz` (integrity-checked, optional
+`BACKUP_KEEP` retention prune).  `restore` is safe by design: it backs up
+the current state first, and refuses to overwrite a non-empty library
+without `--force`.  `verify` checks gzip integrity + dump sanity; `list`
+shows the backups.  The MariaDB lifecycle and `MYSQL_*` client settings are
+shared via `lib/mariadb_lifecycle.sh`; the password travels via
+`MYSQL_PWD` only, never on a command line.
+
+Options: `-f/--force`, `-n/--dry-run`, `-d/--debug`, `-v/--version`,
+`-h/--help`.  Defaults live in `config/backup_privetelib.conf`
+(`BACKUP_DIR`, `BACKUP_DB`, `BACKUP_KEEP`).
+
 ## Testing
 
 Each tool has a self-contained regression suite, plus one end-to-end suite that
@@ -363,6 +392,7 @@ wsl.exe bash tests/test_merge_skeleton_into_books.sh # BooksInput_* -> Books rsy
 bash tests/test_export_authors_from_db.sh            # exporter: argv, rows, lifecycle mocks (runs anywhere)
 bash tests/test_reconcile_library.sh                 # recon: classification + collection-progress summary (mock mysql)
 bash tests/test_estimate_download_size.sh            # estimator: sums, top-rated-first breakdown, lifecycle mocks (runs anywhere)
+bash tests/test_backup_privetelib.sh                 # backup/restore: argv, gz artifact, restore guards, lifecycle mocks (runs anywhere)
 bash tests/test_version_sync.sh                      # version locations agree (runs anywhere)
 ```
 
@@ -408,6 +438,7 @@ Releases are tagged with a tool-prefixed name:
 | `bin/export_authors_from_db.sh` | 1.0.2 | `export_authors_from_db-1.0.2` |
 | `bin/reconcile_library.sh` | 1.0.3 | `reconcile_library-1.0.3` |
 | `bin/estimate_download_size.sh` | 1.0.0 | `estimate_download_size-1.0.0` |
+| `bin/backup_privetelib.sh` | 1.0.0 | `backup_privetelib-1.0.0` |
 | `lib/utf8_prefix_generator.awk` | 1.1 | `utf8_prefix_generator-1.1` |
 
 `v2.8.1` and `v6.6.8` predate the tool-prefixed convention.
@@ -439,6 +470,7 @@ bin/build_shell_nested_authors.sh   nested-directory builder
 bin/export_authors_from_db.sh       regenerate the author list from the DB
 bin/reconcile_library.sh            personal-catalog collection-progress report
 bin/estimate_download_size.sh       catalog download-size estimate for a to-collect round
+bin/backup_privetelib.sh            backup/restore of the app-registered privetelib library DB
 bin/bump-version.sh                 bump one tool's version across header + docs
 bin/merge_books_into_skeleton.sh    archive -> in-memory prefix merge tool (BooksInput_<ts> out)
 bin/merge_skeleton_into_books.sh    BooksInput_* -> Books rsync finalize tool
@@ -449,6 +481,7 @@ config/merge_books.conf             defaults for the merge tool (input file, pat
 config/merge_skeleton_into_books.conf   defaults for the finalize tool (paths + discovery root)
 config/reconcile_library.conf       defaults for the recon report (library root, scope, report dir)
 config/estimate_download_size.conf  defaults for the estimator (input list, report dir)
+config/backup_privetelib.conf   defaults for the backup tool (backup dir, db, retention)
 
 tests/test_*.sh                 regression suites (one per tool + e2e + version sync)
 tests/                          fixtures and golden files

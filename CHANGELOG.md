@@ -9,6 +9,39 @@ All notable changes to the author-toolchain scripts in this repository:
 
 ## [Unreleased]
 
+- **New `bin/backup_privetelib.sh` v1.0.0 — backup / restore of the
+  app-registered personal library DB (`privetelib`).**  privetelib is the
+  sibling library the MultiLib desktop app created in-app (Flibusta
+  plugin, empty, same 17-table ml* schema as `flibusta`, connectable from
+  the app) — the target of the representation plan
+  (`docs/REPRESENTATION_PLAN.md`).  This tool is the safety net that must
+  exist BEFORE anything is populated into it: `backup` mysqldumps the DB
+  into `BACKUP_DIR/<db>_<ts>.sql.gz` (gzip-integrity-checked, optional
+  `BACKUP_KEEP` retention prune); `restore` is safe by design — it backs
+  up the current state first and refuses to overwrite a non-empty library
+  without `--force`; `verify` checks gzip + dump sanity; `list` shows the
+  backups.  Registered in `bump-version.sh`/`test_version_sync.sh`/CI;
+  mock-mysql suite `tests/test_backup_privetelib.sh` (23 assertions:
+  argv contract incl. password-never-on-cmdline, gz artifact, retention,
+  restore guards, dry-run, lifecycle mocks).
+
+  Live round-trip verified 2026-09-04: backup -> verify -> restore (with
+  the automatic pre-restore safety backup) against the real (empty)
+  privetelib, server lifecycle managed per invocation.  Two environment
+  issues surfaced and were handled:
+  1. WSL2 mirrored-networking connect hangs — a `mysql` connect to
+     127.0.0.1:3306 can block indefinitely instead of failing fast (the
+     lifecycle lib warns about exactly this).  `mysql` calls now carry
+     `--connect-timeout` (10s, `MYSQL_CONNECT_TIMEOUT`); `mysqldump`
+     (which does NOT accept that flag in MariaDB 10.4) is bounded with
+     `timeout` (`MYSQL_CALL_TIMEOUT`, default 90s) and its stderr is now
+     shown on failure instead of swallowed.
+  2. `privetelib.mlcustinfo.frm` was corrupt (error 1033 on LOCK TABLES)
+     — a damaged table definition in the app-created library.  Repaired
+     by recreating the (empty) table from the valid schema:
+     `CREATE TABLE privetelib.mlcustinfo LIKE flibusta.mlcustinfo`.
+     The post-repair backup `privetelib_20260904-004417.sql.gz` is the
+     known-good artifact.
 - **`bin/bump-version.sh` 1.0.0 -> 1.0.1: fix a comment that broke shell
   syntax.**  The registry entry for the new `estimate_download_size` tool
   was pasted into the header usage block without its `#` prefix, so

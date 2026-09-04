@@ -158,6 +158,9 @@ check_tool reconcile_library \
 check_tool estimate_download_size \
     "bin/estimate_download_size.sh" "" "bin/estimate_download_size.sh"
 
+check_tool backup_privetelib \
+    "bin/backup_privetelib.sh" "" "bin/backup_privetelib.sh"
+
 # --- summary --------------------------------------------------------------------
 echo
 echo "=============================="

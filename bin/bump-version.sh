@@ -41,6 +41,7 @@
 #       export_authors_from_db        (1.0.x)
 #       reconcile_library             (1.0.x)
 #       estimate_download_size        (1.0.x)
+#       backup_privetelib             (1.0.x)
 #
 #   <new_version> must be strictly greater than the current version and match
 #   the tool's version shape (X.Y.Z for shell tools, X.Y for the AWK tool).
@@ -160,6 +161,7 @@ usage() {
     echo "  export_authors_from_db        (1.0.x)"
     echo "  reconcile_library             (1.0.x)"
     echo "  estimate_download_size        (1.0.x)"
+    echo "  backup_privetelib             (1.0.x)"
     echo ""
     echo "Example: $0 build_shell_nested_authors 6.6.11"
     exit 1
@@ -224,6 +226,10 @@ main() {
         estimate_download_size)
             primary="bin/estimate_download_size.sh"
             marker="bin/estimate_download_size.sh"
+            ;;
+        backup_privetelib)
+            primary="bin/backup_privetelib.sh"
+            marker="bin/backup_privetelib.sh"
             ;;
         *)
             echo "Error: unknown tool '$tool'." >&2

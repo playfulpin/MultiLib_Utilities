@@ -1,7 +1,13 @@
 # Personal library representation plan
 
-**Status:** Draft — design only, nothing implemented
-**Updated:** 2026-09-03 (rev 3 — architecture confirmed in-app: sibling library DB)
+**Status:** Design approved; safety net implemented
+**Updated:** 2026-09-04 (rev 4 — backup/restore tool shipped)
+
+> **Safety net (implemented):** `bin/backup_privetelib.sh` v1.0.0 — backup /
+> restore / verify / list of `privetelib` via mysqldump.  `restore` is safe
+> by design (backs up the current state first; refuses to overwrite a
+> non-empty library without `--force`).  Mandatory before Phase 1 populates
+> anything.
 
 ## Goal
 
