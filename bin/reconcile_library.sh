@@ -3,8 +3,8 @@
 ###############################################################################
 # bin/reconcile_library.sh
 #
-# Version:       1.0.1
-# Last updated:  2026-09-03 20:45
+# Version:       1.0.2
+# Last updated:  2026-09-03 21:20
 #
 # -----------------------------------------------------------------------------
 # PURPOSE
@@ -46,7 +46,11 @@
 #
 #   Output: summary on stdout + one TSV report per run in the report dir
 #   (processed_at, author, in_scope, on_disk, catalog_known, catalog_books,
-#   disk_files, status).  Read-only against the library.
+#   disk_files, status).  Each run also writes the next-round shopping
+#   list (reconcile_to_collect_<ts>.txt): the recommended authors with no
+#   books on disk yet, one canonical name per line in byte order - the
+#   same shape as the author-list fixture, so it can feed the merge
+#   pipeline directly.  Read-only against the library.
 #
 # -----------------------------------------------------------------------------
 # USAGE
@@ -128,8 +132,10 @@ unknown to the catalog), with catalog book counts vs on-disk file
 counts.  The library may be flat (<letter>/<author>[/series]) or the
 nested skeleton the merge pipeline produces
 (<letter>/<prefix>/.../<author>[/series]); a folder is an author folder
-when its basename matches a known author name (scope union catalog), so
-authors at any depth are found and structural prefix dirs are ignored.
+when its basename matches a known author name (scope union catalog), so  authors at any depth are found and structural prefix dirs are ignored.
+  Each run also writes a next-round shopping list next to the TSV report:
+  the recommended authors with no books on disk yet, one canonical name
+  per line (byte order), ready to feed the merge pipeline.
 
 Options:
   -l, --library-root DIR   library root to scan
@@ -428,6 +434,11 @@ read -r files_collected files_extra files_total < <(awk -F'\t' '
 pct="$(awk -v a="$collected" -v b="$scope_total" 'BEGIN{ if (b+0 > 0) printf "%.1f", a*100/b; else printf "0.0" }')"
 beyond_total="$(( ${counts[orphan-known]:-0} + ${counts[orphan-unknown]:-0} ))"
 loaded_total="$(( collected + beyond_total ))"
+# "remaining to collect" = recommended authors with no books on disk yet:
+# the missing rows plus the empty-folder rows (an empty folder holds no
+# books, so that author still needs collecting too); with no empty folders
+# it is simply scope_total - collected.
+remaining="$(( ${counts[missing]:-0} + ${counts[empty]:-0} ))"
 # Percentage bases: the from-list share refers to the recommended list
 # (coverage); the beyond-list share refers to what is actually loaded
 # (composition of the loaded set).  The two "listed / unlisted ratio" lines
@@ -441,18 +452,29 @@ printf 'collection progress (recommended-author list: %s author(s)):\n' "$scope_
 printf '  %-33s %6s  %s\n' 'authors (from list)'              "$collected"    "$pct% of the list"
 printf '  %-33s %6s  %s\n' 'authors (beyond list)'            "$beyond_total" "$beyond_pct% of all loaded authors"
 printf '  %-33s %6s%%\n'   'listed / unlisted author ratio'   "$pct_listed_of_loaded"
-printf '  %-33s %6s\n'     'authors (remaining to collect)'   "${counts[missing]:-0}"
+printf '  %-33s %6s\n'     'authors (remaining to collect)'   "$remaining"
 printf '  %-33s %6s\n'     'books on disk'                    "$files_total"
 printf '  %-33s %6s  %s\n' 'books (from listed authors)'      "$files_collected" "$pct_listed_books% of books on disk"
 printf '  %-33s %6s  %s\n' 'books (beyond list authors)'      "$files_extra"     "$pct_beyond_books% of books on disk"
 printf '  %-33s %6s%%\n'   'listed / unlisted books ratio'    "$pct_listed_books"
 printf '  %-33s %6s\n'     'empty (folder, no books)'         "${counts[empty]:-0}"
 
-report_name="reconcile_library_$(date '+%Y%m%d-%H%M%S').tsv"
+stamp="$(date '+%Y%m%d-%H%M%S')"
+report_name="reconcile_library_$stamp.tsv"
+to_collect_name="reconcile_to_collect_$stamp.txt"
+# Next-round shopping list: every recommended author with no books on disk
+# yet (missing rows + empty-folder rows), one canonical name per line in
+# byte order - the same shape as the author-list fixture.
+awk -F'\t' '$3 == 1 && ($8 == "missing" || $8 == "empty") { print $2 }' \
+    "$tmp_dir/report.tsv" | LC_ALL=C sort -u > "$tmp_dir/to_collect.txt"
+to_collect_total="$(wc -l < "$tmp_dir/to_collect.txt" | tr -d ' ')"
 if (( DRY_RUN )); then
     log "dry-run: report would be written to $RECON_REPORT_DIR/$report_name"
+    log "dry-run: to-collect list ($to_collect_total author(s)) would be written to $RECON_REPORT_DIR/$to_collect_name"
 else
     mkdir -p "$RECON_REPORT_DIR"
     cp "$tmp_dir/report.tsv" "$RECON_REPORT_DIR/$report_name"
     log "info : report written to $RECON_REPORT_DIR/$report_name"
+    cp "$tmp_dir/to_collect.txt" "$RECON_REPORT_DIR/$to_collect_name"
+    log "info : to-collect list ($to_collect_total author(s)) written to $RECON_REPORT_DIR/$to_collect_name"
 fi

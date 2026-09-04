@@ -288,6 +288,12 @@ book counts (mlauthorname snapshot) next to on-disk file counts.
 ./bin/reconcile_library.sh --dry-run      # analyze, write no report
 ```
 
+Each run also writes the **next-round shopping list** — the recommended
+authors with no books on disk yet (`authors (remaining to collect)`) — as
+`reconcile_to_collect_<ts>.txt` next to the TSV report: byte-ordered, one
+canonical name per line, the same shape as the author-list fixture, so it
+can feed the merge pipeline directly.
+
 Options: `-l/--library-root`, `-s/--scope-file`, `-r/--report-dir`,
 `--no-db`, `-n/--dry-run`, `-d/--debug`, `-v/--version`, `-h/--help`.
 Defaults live in `config/reconcile_library.conf`; the MariaDB lifecycle and
@@ -351,7 +357,7 @@ Releases are tagged with a tool-prefixed name:
 | `bin/merge_books_into_skeleton.sh` | 0.2.0 | `merge_books_into_skeleton-0.2.0` |
 | `bin/merge_skeleton_into_books.sh` | 0.2.3 | `merge_skeleton_into_books-0.2.3` |
 | `bin/export_authors_from_db.sh` | 1.0.2 | `export_authors_from_db-1.0.2` |
-| `bin/reconcile_library.sh` | 1.0.1 | `reconcile_library-1.0.1` |
+| `bin/reconcile_library.sh` | 1.0.2 | `reconcile_library-1.0.2` |
 | `lib/utf8_prefix_generator.awk` | 1.1 | `utf8_prefix_generator-1.1` |
 
 `v2.8.1` and `v6.6.8` predate the tool-prefixed convention.

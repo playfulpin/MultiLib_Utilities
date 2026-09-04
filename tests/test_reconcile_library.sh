@@ -153,7 +153,7 @@ if grep -qE "collection progress \(recommended-author list: 3 author\(s\)\):" "$
    && grep -qE "authors \(from list\)[[:space:]]+1[[:space:]]+33.3% of the list" "$OUT" \
    && grep -qE "authors \(beyond list\)[[:space:]]+2[[:space:]]+66.7% of all loaded authors" "$OUT" \
    && grep -qE "listed / unlisted author ratio[[:space:]]+33.3%$" "$OUT" \
-   && grep -qE "authors \(remaining to collect\)[[:space:]]+1$" "$OUT" \
+   && grep -qE "authors \(remaining to collect\)[[:space:]]+2$" "$OUT" \
    && grep -qE "books on disk[[:space:]]+4$" "$OUT" \
    && grep -qE "books \(from listed authors\)[[:space:]]+1[[:space:]]+25.0% of books on disk" "$OUT" \
    && grep -qE "books \(beyond list authors\)[[:space:]]+3[[:space:]]+75.0% of books on disk" "$OUT" \
@@ -162,6 +162,23 @@ if grep -qE "collection progress \(recommended-author list: 3 author\(s\)\):" "$
     report "summary_collection_progress_no_db" ok
 else
     report "summary_collection_progress_no_db" fail "$(tr '\n' '|' < "$OUT")"
+fi
+# the run also exports the next-round shopping list: every recommended
+# author with no books on disk yet (Мартынов Георгий missing + Абби Линн
+# empty folder), byte-ordered, one canonical name per line
+report_file="$(ls "$REPORT_DIR"/reconcile_to_collect_*.txt 2>/dev/null | head -1)"
+if [[ -n "$report_file" ]] \
+   && grep -qF "Мартынов Георгий" "$report_file" \
+   && grep -qF "Абби Линн" "$report_file" \
+   && [[ "$(wc -l < "$report_file" | tr -d ' ')" == "2" ]]; then
+    report "to_collect_list_exported" ok
+else
+    report "to_collect_list_exported" fail "file=${report_file:-missing}"
+fi
+if [[ -n "$report_file" ]] && head -n 1 "$report_file" | grep -qF "Абби Линн"; then
+    report "to_collect_list_byte_order" ok
+else
+    report "to_collect_list_byte_order" fail "first line: $(head -n 1 "$report_file" 2>/dev/null)"
 fi
 
 # --- dry-run writes nothing -----------------------------------------------------

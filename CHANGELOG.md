@@ -9,6 +9,16 @@ All notable changes to the author-toolchain scripts in this repository:
 
 ## [Unreleased]
 
+- **`bin/reconcile_library.sh` v1.0.1 → 1.0.2 — next-round shopping list.
+  Every run now also exports the `reconcile_to_collect_<ts>.txt` artifact
+  next to the TSV report: every recommended author with no books on disk
+  yet — the `missing` rows plus `empty`-folder rows (`authors (remaining
+  to collect)` now counts both, so an author with an empty folder is still
+  to collect; identical numbers while no empty folders exist) — one
+  canonical name per line in byte order, the same shape as the author-list
+  fixture, ready to feed the merge pipeline for the next collecting round.
+  `--dry-run` logs would-write without creating it.  Suite grown to 20/20
+  checks (export content + byte order asserted).
 - **`bin/reconcile_library.sh` v1.0.0 → 1.0.1 — statistics rebuilt around
   the personal-catalog model.**  The tool is a **collection-progress** report,
   not a completeness audit: the scope file is the recommended-author list
