@@ -46,7 +46,7 @@ trap 'rm -rf "$TMPDIR_WS"' EXIT
 # --- fake library (flat <letter>/<author>[/series] layout) ---------------------
 LIB="$TMPDIR_WS/lib"
 mkdir -p "$LIB/А/Абби Линн" "$LIB/А/Азимов Айзек" "$LIB/M/MeXXanik Гоблин/Серия"
-mkdir -p "$LIB/M/Стругацкие Братья"
+mkdir -p "$LIB/M/Стругацкие Братья" "$LIB/П/Пустой Автор"  # empty, not on the list
 printf 'x' > "$LIB/А/Азимов Айзек/kniga1.fb2"
 printf 'x' > "$LIB/M/MeXXanik Гоблин/Серия/book1.fb2"
 printf 'x' > "$LIB/M/MeXXanik Гоблин/loose.zip"
@@ -73,7 +73,7 @@ done
 exit 0
 MOCK_EOF
 chmod +x "$MOCK_BIN/mysql"
-printf 'MeXXanik Гоблин\t12\nАзимов Айзек\t25\nСтругацкие Братья\t4\n' > "$MOCK_CATALOG"
+printf 'MeXXanik Гоблин\t12\nАзимов Айзек\t25\nСтругацкие Братья\t4\nПустой Автор\t3\n' > "$MOCK_CATALOG"
 
 REPORT_DIR="$TMPDIR_WS/reports"
 OUT="$TMPDIR_WS/stdout.txt"
@@ -222,6 +222,35 @@ if grep -qE "authors \(from list\)[[:space:]]+1[[:space:]]+33.3% of the list" "$
     report "summary_ratio_lines_db" ok
 else
     report "summary_ratio_lines_db" fail "$(tr '\n' '|' < "$OUT")"
+fi
+# beyond-books review export (db run above): every on-disk file attributed
+# to a beyond-list author (MeXXanik Гоблин + Стругацкие Братья), as
+# author<TAB>relative-path; collected-author files are excluded
+beyond_file="$(ls "$REPORT_DIR"/reconcile_beyond_books_*.tsv 2>/dev/null | head -1)"
+row_a=$'MeXXanik Гоблин\tM/MeXXanik Гоблин/loose.zip'
+row_b=$'MeXXanik Гоблин\tM/MeXXanik Гоблин/Серия/book1.fb2'
+row_c=$'Стругацкие Братья\tM/Стругацкие Братья/kniga1.fb2'
+if [[ -n "$beyond_file" ]] \
+   && [[ "$(wc -l < "$beyond_file" | tr -d ' ')" == "3" ]] \
+   && grep -qF "$row_a" "$beyond_file" \
+   && grep -qF "$row_b" "$beyond_file" \
+   && grep -qF "$row_c" "$beyond_file"; then
+    report "beyond_books_export_content" ok
+else
+    report "beyond_books_export_content" fail "file=${beyond_file:-missing} lines=$(wc -l < "${beyond_file:-/dev/null}" 2>/dev/null | tr -d ' ')"
+fi
+if [[ -n "$beyond_file" ]] && ! grep -qF $'Азимов Айзек\t' "$beyond_file"; then
+    report "beyond_books_excludes_collected" ok
+else
+    report "beyond_books_excludes_collected" fail "collected-author file leaked into the export"
+fi
+# a book-less folder that matches a catalog name but is not on the list is
+# not an author-with-books: it must not appear in the report or the export
+if ! grep -qF $'\tПустой Автор\t' "$report_file" \
+   && [[ -n "$beyond_file" ]] && ! grep -qF $'Пустой Автор\t' "$beyond_file"; then
+    report "bookless_beyond_folder_not_reported" ok
+else
+    report "bookless_beyond_folder_not_reported" fail "book-less 'Пустой Автор' folder leaked into report/export"
 fi
 
 # --- nested skeleton layout (DB mode): authors at depth>2 are found -----------

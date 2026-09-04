@@ -3,8 +3,8 @@
 ###############################################################################
 # bin/reconcile_library.sh
 #
-# Version:       1.0.2
-# Last updated:  2026-09-03 21:20
+# Version:       1.0.3
+# Last updated:  2026-09-03 21:40
 #
 # -----------------------------------------------------------------------------
 # PURPOSE
@@ -50,7 +50,12 @@
 #   list (reconcile_to_collect_<ts>.txt): the recommended authors with no
 #   books on disk yet, one canonical name per line in byte order - the
 #   same shape as the author-list fixture, so it can feed the merge
-#   pipeline directly.  Read-only against the library.
+#   pipeline directly.  In DB mode it additionally writes the beyond-books
+#   review export (reconcile_beyond_books_<ts>.tsv): every on-disk file
+#   attributed to a beyond-list author as author<TAB>relative-path, the
+#   per-file content behind "books (beyond list authors)", so the user
+#   can review whether those books should stay.  Read-only against the
+#   library.
 #
 # -----------------------------------------------------------------------------
 # USAGE
@@ -135,7 +140,10 @@ nested skeleton the merge pipeline produces
 when its basename matches a known author name (scope union catalog), so  authors at any depth are found and structural prefix dirs are ignored.
   Each run also writes a next-round shopping list next to the TSV report:
   the recommended authors with no books on disk yet, one canonical name
-  per line (byte order), ready to feed the merge pipeline.
+  per line (byte order), ready to feed the merge pipeline.  In DB mode it
+  additionally writes the beyond-books review export - every on-disk file
+  attributed to a beyond-list author, author + relative path per line, to
+  review whether those books should stay.
 
 Options:
   -l, --library-root DIR   library root to scan
@@ -316,17 +324,22 @@ FILENAME == lower_f {
         return 1
     }
 
+    # per-file attribution capture (author-or-folder name + relative path),
+    # later filtered to the beyond-list authors for the review export
+    : > "$tmp_dir/attrib.txt"
     while IFS= read -r file; do
         rel="${file#"$RECON_LIBRARY_ROOT"/}"
         base="${rel##*/}"
         [[ "$base" == desktop.ini || "$base" == .* ]] && continue
         if owner="$(nearest_author "$rel")"; then
             printf 'A\t%s\t1\n' "${owner##*/}" >> "$tmp_dir/disk_raw.txt"
+            printf '%s\t%s\n' "${owner##*/}" "$rel" >> "$tmp_dir/attrib.txt"
         else
             # stray: no author folder above it; attribute to the folder that
             # directly holds the file (its parent relpath)
             parent="${rel%/*}"
             printf 'O\t%s\t1\n' "${parent##*/}" >> "$tmp_dir/disk_raw.txt"
+            printf '%s\t%s\n' "${parent##*/}" "$rel" >> "$tmp_dir/attrib.txt"
         fi
     done < <(find "$RECON_LIBRARY_ROOT" -type f | LC_ALL=C sort)
     unset author_set
@@ -344,6 +357,14 @@ else
     done < <(find "$RECON_LIBRARY_ROOT" -mindepth 2 -maxdepth 2 -type d | LC_ALL=C sort)
     LC_ALL=C sort -u "$tmp_dir/disk.txt" -o "$tmp_dir/disk.txt"
 fi
+# Drop book-less folders that are not recommended authors: a zero-file dir
+# whose name is not on the list is not an author-with-books (structural
+# skeleton-prefix dirs that happen to match a catalog name, or folders left
+# with only desktop.ini metadata).  Recommended authors keep their row, so
+# an in-scope empty folder is still reported as "empty".
+awk -F'\t' 'NR == FNR { sc[$0] = 1; next } ($2 + 0 > 0) || ($1 in sc) { print }' \
+    "$tmp_dir/scope.txt" "$tmp_dir/disk.txt" > "$tmp_dir/disk.filtered"
+mv "$tmp_dir/disk.filtered" "$tmp_dir/disk.txt"
 debug "disk: $(wc -l < "$tmp_dir/disk.txt" | tr -d ' ') author/beyond-scope folder(s), "\
      "$(awk -F'\t' '{s+=$2} END{print s+0}' "$tmp_dir/disk.txt") file(s)"
 
@@ -477,4 +498,30 @@ else
     log "info : report written to $RECON_REPORT_DIR/$report_name"
     cp "$tmp_dir/to_collect.txt" "$RECON_REPORT_DIR/$to_collect_name"
     log "info : to-collect list ($to_collect_total author(s)) written to $RECON_REPORT_DIR/$to_collect_name"
+fi
+
+# Beyond-books review export: every on-disk file attributed to a
+# beyond-list author (orphan-known / orphan-unknown rows), as
+# author<TAB>relative-path lines sorted by author then path - the content
+# the summary reports as "books (beyond list authors)", listed per file so
+# the user can review whether those books should stay.  Requires DB mode:
+# per-file attribution is only available when the catalog name set tells
+# the walk which folders are author folders.
+if (( catalog_have )); then
+    awk -F'\t' '$8 == "orphan-known" || $8 == "orphan-unknown" { print $2 }' \
+        "$tmp_dir/report.tsv" | LC_ALL=C sort -u > "$tmp_dir/orphan_names.txt"
+    awk -F'\t' 'NR == FNR { keep[$1] = 1; next } keep[$1] { print }' \
+        "$tmp_dir/orphan_names.txt" "$tmp_dir/attrib.txt" \
+        | LC_ALL=C sort -t $'\t' -k1,1 -k2,2 > "$tmp_dir/beyond_books.tsv"
+    beyond_books_name="reconcile_beyond_books_$stamp.tsv"
+    beyond_files="$(wc -l < "$tmp_dir/beyond_books.tsv" | tr -d ' ')"
+    beyond_authors="$(cut -f1 "$tmp_dir/beyond_books.tsv" | sort -u | wc -l | tr -d ' ')"
+    if (( DRY_RUN )); then
+        log "dry-run: beyond-books export ($beyond_files file(s) under $beyond_authors author(s)) would be written to $RECON_REPORT_DIR/$beyond_books_name"
+    else
+        cp "$tmp_dir/beyond_books.tsv" "$RECON_REPORT_DIR/$beyond_books_name"
+        log "info : beyond-books export ($beyond_files file(s) under $beyond_authors author(s)) written to $RECON_REPORT_DIR/$beyond_books_name"
+    fi
+else
+    log "warn : beyond-books export skipped (needs DB mode for per-file attribution; rerun without --no-db to review beyond-list books)"
 fi

@@ -9,6 +9,22 @@ All notable changes to the author-toolchain scripts in this repository:
 
 ## [Unreleased]
 
+- **`bin/reconcile_library.sh` v1.0.2 → 1.0.3 — beyond-books review export.
+  In DB mode every run now also writes `reconcile_beyond_books_<ts>.tsv`
+  next to the TSV report: every on-disk file attributed to a beyond-list
+  author (the `orphan-known` / `orphan-unknown` rows) as
+  `author<TAB>relative-path`, sorted by author then path — the per-file
+  content behind the summary's `books (beyond list authors)` figure, so
+  the user can review whether those 961 books should stay.  Requires DB
+  mode (per-file attribution comes from the catalog name set); `--no-db`
+  logs a warning, `--dry-run` logs would-write without creating the file.
+  Book-less folders whose name is not on the list (structural prefix dirs
+  that happen to match a catalog name, or folders left with only
+  desktop.ini) are no longer counted as authors at all — in-scope empty
+  folders still report as `empty` — so `authors (beyond list)` now equals
+  the export's author count and always holds books (64 -> 55 on the real
+  library; 961 books unchanged).  Suite grown to 23/23 checks (export
+  content, collected-author exclusion, book-less folder suppression).
 - **`bin/reconcile_library.sh` v1.0.1 → 1.0.2 — next-round shopping list.
   Every run now also exports the `reconcile_to_collect_<ts>.txt` artifact
   next to the TSV report: every recommended author with no books on disk
