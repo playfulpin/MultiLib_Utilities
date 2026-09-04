@@ -42,6 +42,60 @@ All notable changes to the author-toolchain scripts in this repository:
      `CREATE TABLE privetelib.mlcustinfo LIKE flibusta.mlcustinfo`.
      The post-repair backup `privetelib_20260904-004417.sql.gz` is the
      known-good artifact.
+- **New `bin/populate_privetelib.sh` v1.0.0 — rebuild `privetelib` from
+  the on-disk `Books` collection (representation plan Phase 1).**  The
+  matching key is the md5 finding (see below): every book file is hashed
+  (zip-wrapped FB2 by its DECOMPRESSED content via `unzip -p`/`zcat`,
+  loose `*.fb2` directly) and joined against a single read-only
+  `(md5, bookid)` map pulled from `flibusta.mlbook.md5` — populated for
+  all 869,130 catalog rows, so no per-file queries and no fuzzy
+  matching.  Duplicate md5s (catalog duplicates) resolve to the lowest
+  bookid and are counted; unmatched files land in the per-run TSV report
+  for the author/series/title fallback later.  Copied tables:
+  per-book `mlbook`, `mlauthor`, `mlgenre`, `mlseq`, `mlrating`,
+  `mlcustinfo` (chunked `IN`-lists, `POP_CHUNK`), whole reference
+  `mlauthorname`, `mlgenrename`, `mlseqname`; a per-run column-parity
+  check (Phase 0.1, verified identical for all 9) skips mismatched
+  tables with a warning.  `flibusta` is NEVER written; app-owned
+  `privetelib` tables (`mlactual`, `mldownloaddata`, `mlnews*`,
+  `mluser*`) are never touched; `mlcoverpage`/`mldescription` stay empty
+  (the loaded dump has both EMPTY — covers/descriptions require the
+  separate extended-data torrents loaded first; this corrects the plan's
+  "enrichment comes free" assumption).  Registered in
+  `bump-version.sh`/`test_version_sync.sh`/CI; mock suite
+  `tests/test_populate_privetelib.sh` (23 assertions: walk/hash
+  incl. corrupt-zip + zcat fallback + desktop.ini skip, map contract,
+  dupe resolution, chunked rebuild, parity skip, dry-run no-writes,
+  report, guards, lifecycle mocks).
+
+  **Verified live 2026-09-04**: dry-run then real rebuild against the real
+  catalog and Books collection — 2156 files scanned (2145 zip + 11 loose
+  fb2, 0 corrupt, 0 skipped), **2148 matched (99.6%)** via the exact md5
+  tier, 8 unmatched (7 Bушков «Пиранья» volumes + 1 Bulychev
+  «Девочка…» — exact-content mismatches; the fallback ladder's
+  candidates), 2138 distinct bookids registered (10 files were duplicate
+  copies of already-collected books), 0 catalog md5 duplicates.
+  privetelib rows after the run: mlbook 2138, mlauthor 2798 (multi-author
+  links), mlgenre 5468, mlseq 2619, mlrating 1948, mlcustinfo 757,
+  mlauthorname 216491, mlgenrename 296, mlseqname 80744.  Pre-population
+  empty-state backup: `privetelib_20260904-164703.sql.gz`.  Spot-check:
+  bookid 767638 (MeXXanik «Адвокат Чехов») resolves with both authors;
+  `flibusta` untouched (read-only source).
+- **Catalog finding: `flibusta.mlbook.md5` is 100% populated and is the
+  strongest possible match tier.**  Verified 2026-09-04 against the live
+  catalog: `md5` exists on every one of the 869,130 `mlbook` rows and
+  hashes the DECOMPRESSED FB2 content — `zcat file.zip | md5sum` (==
+  `unzip -p`) resolves a real disk file to exactly one `bookid`, and a
+  loose `.fb2` resolves directly.  This overturns the plan's earlier
+  "md5 matching unavailable" note (that referred to the unloaded
+  `lib.md5` dump — the catalog column itself carries the hashes) and
+  replaces the dead `mlbook.filename`/`arcname` ladder tier (spike:
+  `filename` holds transliterated librusec-style names, `arcname` is 0%
+  populated).  Also measured: `mlcoverpage` and `mldescription` are
+  EMPTY in the loaded dump, so the self-contained enrichment in
+  `privetelib` is ratings (361,761), series, genres and `mlcustinfo`
+  (163,161) — covers/descriptions only after the extended-data torrents
+  are loaded.
 - **`bin/bump-version.sh` 1.0.0 -> 1.0.1: fix a comment that broke shell
   syntax.**  The registry entry for the new `estimate_download_size` tool
   was pasted into the header usage block without its `#` prefix, so

@@ -376,6 +376,38 @@ Options: `-f/--force`, `-n/--dry-run`, `-d/--debug`, `-v/--version`,
 `-h/--help`.  Defaults live in `config/backup_privetelib.conf`
 (`BACKUP_DIR`, `BACKUP_DB`, `BACKUP_KEEP`).
 
+### `bin/populate_privetelib.sh`
+
+Rebuild the **app-registered personal library database (`privetelib`)**
+from the on-disk `Books` collection (Phase 1 of
+`docs/REPRESENTATION_PLAN.md`).  Every book file is md5-hashed
+(zip-wrapped FB2 by its **decompressed content**, loose `*.fb2` directly)
+and matched against `flibusta.mlbook.md5` — the dump pipeline populates
+that column for ALL 869,130 catalog rows, so md5 matching is exact and
+unambiguous.  Resolved bookids copy their full catalog rows
+(`INSERT … SELECT`, per-run column-parity checked) into `privetelib`:
+
+```bash
+./bin/populate_privetelib.sh                     # rebuild privetelib from Books
+./bin/populate_privetelib.sh --dry-run           # walk + resolve + summarize, write nothing
+./bin/populate_privetelib.sh --debug             # verbose diagnostics
+```
+
+Copied tables: `mlbook`, `mlauthor`, `mlgenre`, `mlseq`, `mlrating`,
+`mlcustinfo` (per resolved bookid, chunked `IN`-lists) plus the small
+reference tables `mlauthorname`, `mlgenrename`, `mlseqname` (copied
+whole).  `flibusta` is read-only; app-owned tables in `privetelib`
+(`mlactual`, `mldownloaddata`, `mlnews*`, `mluser*`) are never touched.
+`mlcoverpage`/`mldescription` are not populated — the loaded dump leaves
+both empty (covers/descriptions need the separate extended-data torrents
+loaded first).  Each run writes a TSV report (matched/unmatched per file)
+to `POP_REPORT_DIR`; the MariaDB lifecycle and `MYSQL_*` client settings
+are shared via `lib/mariadb_lifecycle.sh`, password via `MYSQL_PWD` only.
+
+Options: `-n/--dry-run`, `-d/--debug`, `-v/--version`, `-h/--help`.
+Defaults live in `config/populate_privetelib.conf` (`POP_LIBRARY_ROOT`,
+`POP_REPORT_DIR`, `POP_SOURCE_DB`, `POP_TARGET_DB`, `POP_CHUNK`).
+
 ## Testing
 
 Each tool has a self-contained regression suite, plus one end-to-end suite that
@@ -393,6 +425,7 @@ bash tests/test_export_authors_from_db.sh            # exporter: argv, rows, lif
 bash tests/test_reconcile_library.sh                 # recon: classification + collection-progress summary (mock mysql)
 bash tests/test_estimate_download_size.sh            # estimator: sums, top-rated-first breakdown, lifecycle mocks (runs anywhere)
 bash tests/test_backup_privetelib.sh                 # backup/restore: argv, gz artifact, restore guards, lifecycle mocks (runs anywhere)
+bash tests/test_populate_privetelib.sh               # populate: md5 map, walk/hash, resolve, rebuild, parity, lifecycle mocks (runs anywhere)
 bash tests/test_version_sync.sh                      # version locations agree (runs anywhere)
 ```
 
@@ -439,6 +472,7 @@ Releases are tagged with a tool-prefixed name:
 | `bin/reconcile_library.sh` | 1.0.3 | `reconcile_library-1.0.3` |
 | `bin/estimate_download_size.sh` | 1.0.0 | `estimate_download_size-1.0.0` |
 | `bin/backup_privetelib.sh` | 1.0.0 | `backup_privetelib-1.0.0` |
+| `bin/populate_privetelib.sh` | 1.0.0 | `populate_privetelib-1.0.0` |
 | `lib/utf8_prefix_generator.awk` | 1.1 | `utf8_prefix_generator-1.1` |
 
 `v2.8.1` and `v6.6.8` predate the tool-prefixed convention.
@@ -471,6 +505,7 @@ bin/export_authors_from_db.sh       regenerate the author list from the DB
 bin/reconcile_library.sh            personal-catalog collection-progress report
 bin/estimate_download_size.sh       catalog download-size estimate for a to-collect round
 bin/backup_privetelib.sh            backup/restore of the app-registered privetelib library DB
+bin/populate_privetelib.sh          rebuild privetelib from the Books collection (md5-matched)
 bin/bump-version.sh                 bump one tool's version across header + docs
 bin/merge_books_into_skeleton.sh    archive -> in-memory prefix merge tool (BooksInput_<ts> out)
 bin/merge_skeleton_into_books.sh    BooksInput_* -> Books rsync finalize tool
@@ -482,6 +517,7 @@ config/merge_skeleton_into_books.conf   defaults for the finalize tool (paths + 
 config/reconcile_library.conf       defaults for the recon report (library root, scope, report dir)
 config/estimate_download_size.conf  defaults for the estimator (input list, report dir)
 config/backup_privetelib.conf   defaults for the backup tool (backup dir, db, retention)
+config/populate_privetelib.conf defaults for the population tool (library root, report dir, db pair, chunk)
 
 tests/test_*.sh                 regression suites (one per tool + e2e + version sync)
 tests/                          fixtures and golden files

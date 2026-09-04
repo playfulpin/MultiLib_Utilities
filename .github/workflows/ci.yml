@@ -38,6 +38,7 @@ jobs:
           bash tests/test_reconcile_library.sh
           bash tests/test_estimate_download_size.sh
           bash tests/test_backup_privetelib.sh
+          bash tests/test_populate_privetelib.sh
 
       - name: UTF-8 suites (WSL-style, multibyte bash)
         run: |

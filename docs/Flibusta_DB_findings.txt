@@ -1,0 +1,43 @@
+My touths on Privete library load / reload
+
+Step 1.
+create file that keep time stamp of the modification /changes of folder.
+
+BOOK_CATALOG_DIR=/mnt/c/Backup_Go7/Books
+REPORT_DIR=/mnt/c/Backup_Go7/merge-reports
+
+stat --printf="%y\t%z"  "$BOOK_CATALOG_DIR" > "$REPORT_DIR/book_catalog_timestamp.txt
+
+Step 2. as a part of internal logic of script bin/reconcile_library.sh
+
+# check existance of timestamp file
+[ -s "/path/to/file.txt" ] && stat --printf="%y\t%z" "$BOOK_CATALOG_DIR" > "$REPORT_DIR/book_catalog_timestamp.txt"
+
+# build check point for comparison
+stat --printf="%y\t%z"  "$BOOK_CATALOG_DIR" > tmpstat
+
+# Do we need to reprocess catalog?
+cmp -s tmpstat "$REPORT_DIR/book_catalog_timestamp.txt" && PROCESS_FLAG=0 || PROCESS_FLAG=1
+
+# main steps for PROCESS_FLAG=1
+#  for every *.zip file in the BOOK_CATALOG_DIR
+
+FILE_MD5=$(zcat "File Name" | md5sum | awk '{print $1}')
+# connect to Flibasta DB and run followng query
+SELECT mlbook.bookid,
+       mlbook.title,
+       mlauthorname.authorid,
+       mlauthorname.FullName,
+       mlauthorname.TotalCount
+FROM mlbook,
+     mlauthor,
+     mlauthorname
+WHERE 1 = 1
+  AND `md5` = $FILE_MD5  -- my test was '74dd58b0f248facc5a0f92cb95e263d0'
+  AND mlbook.bookid = mlauthor.bookid
+  AND mlauthorname.authorid = mlauthor.authorid 
+;
+
+# as far as you can see, we get enouth info to populate Privete DB
+# you can collect md5 information for each file when run bin/reconcile_library.sh
+# hope that help.

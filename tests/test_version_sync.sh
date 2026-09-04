@@ -161,6 +161,9 @@ check_tool estimate_download_size \
 check_tool backup_privetelib \
     "bin/backup_privetelib.sh" "" "bin/backup_privetelib.sh"
 
+check_tool populate_privetelib \
+    "bin/populate_privetelib.sh" "" "bin/populate_privetelib.sh"
+
 # --- summary --------------------------------------------------------------------
 echo
 echo "=============================="
