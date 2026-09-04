@@ -145,6 +145,24 @@ if grep -qF "$row_matched" "$report_file"; then
 else
     report "matched_has_files" fail
 fi
+# the human summary speaks the personal-collection model: progress against
+# the recommended list, with beyond-the-list content counted separately
+# (no-db run above: 3 scope authors -> Азимов collected, Мартынов still to
+# collect, Абби empty; MeXXanik + Стругацкие beyond list, unknown)
+if grep -qE "collection progress \(recommended-author list: 3 author\(s\)\):" "$OUT" \
+   && grep -qE "authors \(from list\)[[:space:]]+1[[:space:]]+33.3% of the list" "$OUT" \
+   && grep -qE "authors \(beyond list\)[[:space:]]+2[[:space:]]+66.7% of all loaded authors" "$OUT" \
+   && grep -qE "listed / unlisted author ratio[[:space:]]+33.3%$" "$OUT" \
+   && grep -qE "authors \(remaining to collect\)[[:space:]]+1$" "$OUT" \
+   && grep -qE "books on disk[[:space:]]+4$" "$OUT" \
+   && grep -qE "books \(from listed authors\)[[:space:]]+1[[:space:]]+25.0% of books on disk" "$OUT" \
+   && grep -qE "books \(beyond list authors\)[[:space:]]+3[[:space:]]+75.0% of books on disk" "$OUT" \
+   && grep -qE "listed / unlisted books ratio[[:space:]]+25.0%$" "$OUT" \
+   && grep -qE "empty \(folder, no books\)[[:space:]]+1$" "$OUT"; then
+    report "summary_collection_progress_no_db" ok
+else
+    report "summary_collection_progress_no_db" fail "$(tr '\n' '|' < "$OUT")"
+fi
 
 # --- dry-run writes nothing -----------------------------------------------------
 before="$(ls "$REPORT_DIR" | wc -l)"
@@ -177,6 +195,16 @@ if [[ "$argv" == *"s3cret"* ]]; then
     report "db_password_never_on_cmdline" fail "password leaked into argv"
 else
     report "db_password_never_on_cmdline" ok
+fi
+# db run above: beyond-the-list content (MeXXanik + Стругацкие) is now
+# known to the catalog via the mock snapshot
+if grep -qE "authors \(from list\)[[:space:]]+1[[:space:]]+33.3% of the list" "$OUT" \
+   && grep -qE "listed / unlisted author ratio[[:space:]]+33.3%$" "$OUT" \
+   && grep -qE "books \(from listed authors\)[[:space:]]+1[[:space:]]+25.0% of books on disk" "$OUT" \
+   && grep -qE "listed / unlisted books ratio[[:space:]]+25.0%$" "$OUT"; then
+    report "summary_ratio_lines_db" ok
+else
+    report "summary_ratio_lines_db" fail "$(tr '\n' '|' < "$OUT")"
 fi
 
 # --- nested skeleton layout (DB mode): authors at depth>2 are found -----------

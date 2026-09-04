@@ -3,37 +3,38 @@
 ###############################################################################
 # bin/reconcile_library.sh
 #
-# Version:       1.0.0
-# Last updated:  2026-09-03
+# Version:       1.0.1
+# Last updated:  2026-09-03 20:45
 #
 # -----------------------------------------------------------------------------
 # PURPOSE
 # -----------------------------------------------------------------------------
-#   Reconciliation report: how well does the on-disk book library match the
-#   catalog author scope the library is supposed to cover?
+#   Collection-progress report for the PERSONAL catalog.  The scope file is
+#   the recommended-author list - authors with highly rated books in the
+#   chosen genre, presented to the user as a catalog to collect from
+#   (default: data/fixtures/authors_list_from_db.txt, regenerable from the
+#   MariaDB catalog via bin/export_authors_from_db.sh).  The library root
+#   (default: /mnt/c/Backup_Go7/Books) is where the user keeps the books
+#   (*.fb2 / *.zip) they have collected so far for later reading.
 #
-#   Two sides are compared at the AUTHOR level:
-#     * scope  - the flat author list the merge pipeline was built from
-#                (default: data/fixtures/authors_list_from_db.txt; the list
-#                is regenerable from the MariaDB catalog via
-#                bin/export_authors_from_db.sh)
-#     * disk   - the library root (default: /mnt/c/Backup_Go7/Books).  The
-#                library may be flat (<letter>/<author>[/series]) OR the
-#                nested skeleton the merge pipeline produces
-#                (<letter>/<prefix>/.../<author>[/series]); both are handled
-#                by recognizing author folders BY NAME: a folder is an author
-#                folder iff its basename matches a known author name (scope
-#                union catalog), so structural skeleton-prefix dirs are never
-#                mistaken for authors and authors at any depth are found.
+#   The report answers, per author:
+#     collected        recommended author whose books are on disk (matched)
+#     still to collect recommended author with nothing on disk yet - normal:
+#                      the list is the target, the collection grows over time
+#     empty            recommended author, folder present but zero files
+#     beyond-scope     on disk but NOT on the current list - the user's own
+#                      picks beyond the recommendation (e.g. gathered under
+#                      an earlier scope); known to the catalog or unknown
+#   Beyond-scope content is NOT an error: it is counted separately so the
+#   headline progress always refers to the recommended list.
 #
-#   Every author is classified:
-#     matched        in the scope AND on disk (file count reported)
-#     missing        in the scope but NO folder on disk
-#     empty          in the scope, folder present, but zero files inside
-#     orphan-known   on disk but NOT in the scope; known to the catalog
-#                    (mlauthorname.FullName) - e.g. from an earlier scope
-#     orphan-unknown on disk, not in the scope, unknown to the catalog
-#                    (files under no author folder anywhere)
+#   The library may be flat (<letter>/<author>[/series]) OR the nested
+#   skeleton the merge pipeline produces
+#   (<letter>/<prefix>/.../<author>[/series]); both are handled by
+#   recognizing author folders BY NAME: a folder is an author folder iff its
+#   basename matches a known author name (scope union catalog), so
+#   structural skeleton-prefix dirs are never mistaken for authors and
+#   authors at any depth are found.
 #
 #   When the MariaDB catalog is reachable (default), the mlauthorname
 #   snapshot is pulled so each row also carries the catalog book count
@@ -55,7 +56,7 @@
 #   Options:
 #       -l, --library-root DIR   library root to scan
 #                                [default: /mnt/c/Backup_Go7/Books]
-#       -s, --scope-file FILE    author list the library should cover
+#       -s, --scope-file FILE    recommended-author list the collection grows toward
 #                                [default: data/fixtures/authors_list_from_db.txt]
 #       -r, --report-dir DIR     directory for the TSV report
 #                                [default: /mnt/c/Backup_Go7/merge-reports]
@@ -118,21 +119,22 @@ print_help() {
     cat >&2 <<'EOF'
 Usage: reconcile_library.sh [options]
 
-Compare the on-disk book library against the catalog author scope (the
-flat author list the merge pipeline uses, e.g.
-data/fixtures/authors_list_from_db.txt) and report, per author:
-matched / missing-on-disk / empty / orphan (known or unknown to the
-catalog), with catalog book counts vs on-disk file counts.  The library
-may be flat (<letter>/<author>[/series]) or the nested skeleton the
-merge pipeline produces (<letter>/<prefix>/.../<author>[/series]); a
-folder is an author folder when its basename matches a known author
-name (scope union catalog), so authors at any depth are found and
-structural prefix dirs are ignored.
+Track the PERSONAL catalog's collection progress against the
+recommended-author list (the scope file, e.g.
+data/fixtures/authors_list_from_db.txt): how many recommended authors'
+books are collected on disk, how many are still to collect, and what
+extra content sits beyond the list (the user's own picks, known or
+unknown to the catalog), with catalog book counts vs on-disk file
+counts.  The library may be flat (<letter>/<author>[/series]) or the
+nested skeleton the merge pipeline produces
+(<letter>/<prefix>/.../<author>[/series]); a folder is an author folder
+when its basename matches a known author name (scope union catalog), so
+authors at any depth are found and structural prefix dirs are ignored.
 
 Options:
   -l, --library-root DIR   library root to scan
                            [default: /mnt/c/Backup_Go7/Books]
-  -s, --scope-file FILE    author list the library should cover
+  -s, --scope-file FILE    recommended-author list the collection grows toward
                            [default: data/fixtures/authors_list_from_db.txt]
   -r, --report-dir DIR     directory for the TSV report
                            [default: /mnt/c/Backup_Go7/merge-reports]
@@ -336,7 +338,7 @@ else
     done < <(find "$RECON_LIBRARY_ROOT" -mindepth 2 -maxdepth 2 -type d | LC_ALL=C sort)
     LC_ALL=C sort -u "$tmp_dir/disk.txt" -o "$tmp_dir/disk.txt"
 fi
-debug "disk: $(wc -l < "$tmp_dir/disk.txt" | tr -d ' ') author/orphan folder(s), "\
+debug "disk: $(wc -l < "$tmp_dir/disk.txt" | tr -d ' ') author/beyond-scope folder(s), "\
      "$(awk -F'\t' '{s+=$2} END{print s+0}' "$tmp_dir/disk.txt") file(s)"
 
 # --- 4. classify in a single awk pass -------------------------------------------
@@ -404,13 +406,47 @@ declare -A counts
 while read -r st n; do
     counts[$st]=$n
 done < "$tmp_dir/summary.txt"
-printf 'reconciliation summary:\n'
-printf '  matched          %6s\n'   "${counts[matched]:-0}"
-printf '  missing (no folder)   %4s\n' "${counts[missing]:-0}"
-printf '  empty (folder, 0 files)%3s\n' "${counts[empty]:-0}"
-printf '  orphan-known     %6s\n'  "${counts[orphan-known]:-0}"
-printf '  orphan-unknown   %6s\n'  "${counts[orphan-unknown]:-0}"
-awk -F'\t' 'NR>1 && $7 != "-" {n+=$7} END{printf "  on-disk files    %6d\n", n}' "$tmp_dir/report.tsv"
+scope_total="$(wc -l < "$tmp_dir/scope.txt" | tr -d ' ')"
+# Distinct RECOMMENDED authors with books on disk: only rows that are in
+# scope and matched.  A case-variant disk folder of a list author (matched
+# via the ASCII-casefold fallback) yields TWO matched rows - the canonical
+# scope row and the variant disk row - so counting rows would overstate
+# the number of collected authors; counting in-scope rows keeps the scope
+# partition exact (collected + still-to-collect + empty == scope_total).
+collected="$(awk -F'\t' '$3 == 1 && $8 == "matched" {c++} END {print c+0}' "$tmp_dir/report.tsv")"
+# Split the on-disk book count by attribution.  The report has NO header
+# row (first line is a data row), so no line is skipped: every row with a
+# numeric file count contributes to the total, and the file count of each
+# collected (matched) / beyond-scope (orphan-*) author lands in its bucket.
+read -r files_collected files_extra files_total < <(awk -F'\t' '
+    $7 != "-" {
+        total += $7
+        if ($8 == "matched") collected += $7
+        else if ($8 == "orphan-known" || $8 == "orphan-unknown") extra += $7
+    }
+    END { printf "%d %d %d\n", collected+0, extra+0, total+0 }' "$tmp_dir/report.tsv")
+pct="$(awk -v a="$collected" -v b="$scope_total" 'BEGIN{ if (b+0 > 0) printf "%.1f", a*100/b; else printf "0.0" }')"
+beyond_total="$(( ${counts[orphan-known]:-0} + ${counts[orphan-unknown]:-0} ))"
+loaded_total="$(( collected + beyond_total ))"
+# Percentage bases: the from-list share refers to the recommended list
+# (coverage); the beyond-list share refers to what is actually loaded
+# (composition of the loaded set).  The two "listed / unlisted ratio" lines
+# express the listed side as a share of its combined total (listed /
+# (listed + unlisted)), i.e. the complement of the beyond-list share.
+pct_listed_of_loaded="$(awk -v a="$collected" -v b="$loaded_total" 'BEGIN{ if (b+0 > 0) printf "%.1f", a*100/b; else printf "0.0" }')"
+beyond_pct="$(awk -v a="$beyond_total" -v b="$loaded_total" 'BEGIN{ if (b+0 > 0) printf "%.1f", a*100/b; else printf "0.0" }')"
+pct_listed_books="$(awk -v a="$files_collected" -v b="$files_total" 'BEGIN{ if (b+0 > 0) printf "%.1f", a*100/b; else printf "0.0" }')"
+pct_beyond_books="$(awk -v a="$files_extra" -v b="$files_total" 'BEGIN{ if (b+0 > 0) printf "%.1f", a*100/b; else printf "0.0" }')"
+printf 'collection progress (recommended-author list: %s author(s)):\n' "$scope_total"
+printf '  %-33s %6s  %s\n' 'authors (from list)'              "$collected"    "$pct% of the list"
+printf '  %-33s %6s  %s\n' 'authors (beyond list)'            "$beyond_total" "$beyond_pct% of all loaded authors"
+printf '  %-33s %6s%%\n'   'listed / unlisted author ratio'   "$pct_listed_of_loaded"
+printf '  %-33s %6s\n'     'authors (remaining to collect)'   "${counts[missing]:-0}"
+printf '  %-33s %6s\n'     'books on disk'                    "$files_total"
+printf '  %-33s %6s  %s\n' 'books (from listed authors)'      "$files_collected" "$pct_listed_books% of books on disk"
+printf '  %-33s %6s  %s\n' 'books (beyond list authors)'      "$files_extra"     "$pct_beyond_books% of books on disk"
+printf '  %-33s %6s%%\n'   'listed / unlisted books ratio'    "$pct_listed_books"
+printf '  %-33s %6s\n'     'empty (folder, no books)'         "${counts[empty]:-0}"
 
 report_name="reconcile_library_$(date '+%Y%m%d-%H%M%S').tsv"
 if (( DRY_RUN )); then

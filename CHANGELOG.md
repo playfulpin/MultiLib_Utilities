@@ -9,6 +9,36 @@ All notable changes to the author-toolchain scripts in this repository:
 
 ## [Unreleased]
 
+- **`bin/reconcile_library.sh` v1.0.0 → 1.0.1 — statistics rebuilt around
+  the personal-catalog model.**  The tool is a **collection-progress** report,
+  not a completeness audit: the scope file is the recommended-author list
+  (highly rated authors in the chosen genre, the user's shopping list) and
+  the library root is where the user keeps the books collected so far.
+  "Not yet collected" is therefore the normal, expected state of most of the
+  list — not a defect — and on-disk content that is not on the current list
+  is the user's own pick, not an orphan to flag.  The summary now reads as
+  collection progress against the recommended list, in the user's own
+  shape: author counts first (`authors (from list)` with its % of the
+  list, `authors (beyond list)` with its % of all loaded authors, the
+  `listed / unlisted author ratio` = listed share of all loaded, `authors
+  (remaining to collect)`), then the books (`books on disk`;
+  `books (from listed authors)` / `books (beyond list authors)` each with
+  its % of books on disk; the `listed / unlisted books ratio`), and
+  `empty (folder, no books)` last.  Units and percentage bases are
+  explicit on every line — list coverage vs composition of the loaded set
+  vs share of books on disk — so the 44 loaded list authors (holding
+  1,195 books) can never be read as a book count against the 2,156 books
+  on disk.  The known/unknown-to-catalog split of beyond-list authors
+  stays in the per-row TSV.  `collected` counts distinct
+  list authors, so a case-variant disk folder of a list author (which the
+  report marks matched under both spellings) is not double-counted and the
+  headline partition stays exact: collected + still-to-collect + empty ==
+  scope.  The report's machine statuses
+  and TSV shape are unchanged.  Also fixes the on-disk file-count readout,
+  which assumed a header row the headerless report does not have and so
+  silently dropped the first author's files from the total every run; the
+  suite now asserts the progress summary (no-db and db variants, 18/18
+  checks green).
 - **New `bin/reconcile_library.sh` v1.0.0 — catalog vs library reconciliation
   report.**  Compares the on-disk book library (default
   `/mnt/c/Backup_Go7/Books`) against the catalog author scope the merge
@@ -33,7 +63,7 @@ All notable changes to the author-toolchain scripts in this repository:
   a summary plus one per-run TSV report in the report dir (default
   `/mnt/c/Backup_Go7/merge-reports`).  Config `config/reconcile_library.conf`
   (flag > env > config > default); registered in the version-sync
-  machinery and CI (mock-mysql suite, 16 checks, runs anywhere).
+  machinery and CI (mock-mysql suite, runs anywhere).
 - **Shared `lib/mariadb_lifecycle.sh` v1.0.0.**  The MariaDB lifecycle
   (tasklist interop check, elevated PowerShell start, bounded readiness
   probe, graceful SHUTDOWN / taskkill stop, already-running servers left

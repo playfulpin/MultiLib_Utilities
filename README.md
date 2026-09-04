@@ -271,6 +271,28 @@ rows (in hash order — sort before comparing).
 gawk -v maxlen=5 -F '\n' -f lib/utf8_prefix_generator.awk <sorted_input>
 ```
 
+### `bin/reconcile_library.sh`
+
+Personal-catalog **collection-progress** report.  The scope file
+(`data/fixtures/authors_list_from_db.txt`) is the recommended-author list —
+authors with highly rated books in the chosen genre; the library root
+(`/mnt/c/Backup_Go7/Books`) is where the user collects those authors' books
+for later reading.  The report counts how much of the list is already
+collected, what is still to collect, and what extra content sits beyond the
+list (the user's own picks, known / unknown to the catalog), with catalog
+book counts (mlauthorname snapshot) next to on-disk file counts.
+
+```bash
+./bin/reconcile_library.sh                # summary + per-run TSV report
+./bin/reconcile_library.sh --no-db        # skip the mlauthorname snapshot
+./bin/reconcile_library.sh --dry-run      # analyze, write no report
+```
+
+Options: `-l/--library-root`, `-s/--scope-file`, `-r/--report-dir`,
+`--no-db`, `-n/--dry-run`, `-d/--debug`, `-v/--version`, `-h/--help`.
+Defaults live in `config/reconcile_library.conf`; the MariaDB lifecycle and
+`MYSQL_*` client settings are shared via `lib/mariadb_lifecycle.sh`.
+
 ## Testing
 
 Each tool has a self-contained regression suite, plus one end-to-end suite that
@@ -284,6 +306,8 @@ wsl.exe bash tests/test_utf8_prefix_generator.sh     # AWK generator: direct edg
 wsl.exe bash tests/test_e2e_pipeline.sh              # generator -> validator -> renderer on real data
 wsl.exe bash tests/test_merge_books_into_skeleton.sh # archive -> in-memory prefix hierarchy (WSL)
 wsl.exe bash tests/test_merge_skeleton_into_books.sh # BooksInput_* -> Books rsync finalize (WSL/Linux + rsync)
+bash tests/test_export_authors_from_db.sh            # exporter: argv, rows, lifecycle mocks (runs anywhere)
+bash tests/test_reconcile_library.sh                 # recon: classification + collection-progress summary (mock mysql)
 bash tests/test_version_sync.sh                      # version locations agree (runs anywhere)
 ```
 
@@ -303,8 +327,8 @@ edits all four in one shot, so use it for every bump:
 ## Continuous integration
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on every push/PR: shell
-syntax check across `bin/` and `lib/`, the version-sync suite, and all eight
-test suites on `ubuntu-latest`. Linux bash is multibyte-capable, so the
+syntax check across `bin/` and `lib/`, the version-sync suite, and all nine
+tool suites on `ubuntu-latest`. Linux bash is multibyte-capable, so the
 WSL-only constraint of the UTF-8 suites does not block CI; the finalize suite
 needs rsync (present on the runners) and the rest run anywhere. This is what
 caught the two suites that had been broken since the layout refactor.
@@ -327,7 +351,7 @@ Releases are tagged with a tool-prefixed name:
 | `bin/merge_books_into_skeleton.sh` | 0.2.0 | `merge_books_into_skeleton-0.2.0` |
 | `bin/merge_skeleton_into_books.sh` | 0.2.3 | `merge_skeleton_into_books-0.2.3` |
 | `bin/export_authors_from_db.sh` | 1.0.2 | `export_authors_from_db-1.0.2` |
-| `bin/reconcile_library.sh` | 1.0.0 | `reconcile_library-1.0.0` |
+| `bin/reconcile_library.sh` | 1.0.1 | `reconcile_library-1.0.1` |
 | `lib/utf8_prefix_generator.awk` | 1.1 | `utf8_prefix_generator-1.1` |
 
 `v2.8.1` and `v6.6.8` predate the tool-prefixed convention.
@@ -356,14 +380,17 @@ bin/build_prefix_table.sh           prefix-table generator (working script)
 bin/prefix_table_integrity.sh       prefix-table validator
 bin/prefix_tree_visualizer.sh       prefix-tree renderer
 bin/build_shell_nested_authors.sh   nested-directory builder
-bin/build_prefix_table.sh           prefix-table generator
+bin/export_authors_from_db.sh       regenerate the author list from the DB
+bin/reconcile_library.sh            personal-catalog collection-progress report
 bin/bump-version.sh                 bump one tool's version across header + docs
 bin/merge_books_into_skeleton.sh    archive -> in-memory prefix merge tool (BooksInput_<ts> out)
 bin/merge_skeleton_into_books.sh    BooksInput_* -> Books rsync finalize tool
 lib/merge_books_functions.sh        shared functions for the merge tool
+lib/mariadb_lifecycle.sh            shared MariaDB lifecycle (start/stop/readiness)
 lib/utf8_prefix_generator.awk       original AWK generator (parity reference)
 config/merge_books.conf             defaults for the merge tool (input file, paths, tree knobs)
 config/merge_skeleton_into_books.conf   defaults for the finalize tool (paths + discovery root)
+config/reconcile_library.conf       defaults for the recon report (library root, scope, report dir)
 
 tests/test_*.sh                 regression suites (one per tool + e2e + version sync)
 tests/                          fixtures and golden files
