@@ -3,7 +3,7 @@
 ###############################################################################
 # bin/populate_privetelib.sh
 #
-# Version:       1.1.0
+# Version:       1.1.1
 # Last updated:  2026-09-04
 #
 # -----------------------------------------------------------------------------
@@ -46,17 +46,21 @@
 #
 #   Reference entities are inserted for OUR books only:
 #       mlauthorname  <- distinct authors of the resolved bookids
-#       mlgenrename   <- distinct genres, parentgenreid remapped to the
-#                        freshly generated parent id (or NULL when the
-#                        parent genre is not part of the personal library),
-#                        emitted parent-first so @gid_* exists when used
+#       mlgenrename   <- distinct genres of the resolved bookids PLUS
+#                        their ancestor categories (fetched from the
+#                        catalog so the genre tree the app renders is
+#                        preserved); parentgenreid remapped to the freshly
+#                        generated parent id (or NULL when an ancestor is
+#                        absent), emitted parent-first so @gid_* exists
+#                        when used
 #       mlseqname     <- distinct series of the resolved bookids
 #   Per-book tables, in strict dependency order:
-#       mlbook        <- one row per resolved book; filename/arcname carry
-#                        the REAL on-disk relative path (e.g.
-#                        "А/Аб/Абби Линн/Series X/0Мироходец.zip") and the
-#                        zip member name (arcname is empty for loose .fb2);
-#                        library='privetelib', filesize = on-disk bytes,
+#       mlbook        <- one row per resolved book; filename carries the
+#                        CATALOG value (flibusta.mlbook.filename, the
+#                        transliterated name the app expects - the on-disk
+#                        path is NOT what the app displays), arcname the
+#                        on-disk zip member name (empty for loose .fb2),
+#                        filesize the on-disk bytes; library='privetelib',
 #                        ext='fb2' (content format), all catalog metadata
 #                        (title, lang, md5, pi_*, ...) copied verbatim
 #       mlauthor      <- (new bookid, new authorid, role)
@@ -79,8 +83,8 @@
 #   dangling key references.
 #
 #   After population, switch MultiLib.exe to privetelib to browse the
-#   personal collection with ratings/series/genres, and - with the real
-#   paths in mlbook.filename/arcname - try opening a book from the app.
+#   personal collection with ratings/series/genres, and - with arcname
+#   holding the on-disk zip member - try opening a book from the app.
 #
 #   The MariaDB lifecycle is shared with the rest of the toolchain
 #   (lib/mariadb_lifecycle.sh): a server that is down is started
@@ -430,6 +434,38 @@ generate_rebuild_sql() {
     LC_ALL=C sort -u "$tmp/mlrating_t.tsv"                  -o "$tmp/mlrating_t.tsv"
     LC_ALL=C sort -u "$tmp/mlcustinfo_t.tsv"                -o "$tmp/mlcustinfo_t.tsv"
 
+    # expand the genre tree: the app renders mlgenrename as a tree, so the
+    # ancestor categories of every used genre must be present too (in the
+    # catalog a genre's parentgenreid points at a top-level category row
+    # that no book references directly).  Pull ancestors iteratively until
+    # the parent set is closed (bounded; the catalog tree is 2 levels).
+    awk -F'\t' '$2 != "NULL" && $2 != "" && $2 != "0" {print $2}' "$tmp/genres.tsv" \
+        | LC_ALL=C sort -un > "$tmp/genre_pids.txt"
+    : > "$tmp/genre_tried.txt"
+    giter=0
+    while (( giter < 10 )) && [[ -s "$tmp/genre_pids.txt" ]]; do
+        # pending = parent ids not yet known AND not yet attempted (a
+        # dangling parent must not be re-fetched forever)
+        awk -F'\t' 'NR==FNR { have[$1]=1; next } !($1 in have)' \
+            "$tmp/genres.tsv" "$tmp/genre_pids.txt" > "$tmp/genre_new.txt"
+        if [[ -s "$tmp/genre_tried.txt" ]]; then
+            awk -F'\t' 'NR==FNR { tried[$1]=1; next } !($1 in tried)' \
+                "$tmp/genre_tried.txt" "$tmp/genre_new.txt" > "$tmp/genre_tmp.txt"
+            mv "$tmp/genre_tmp.txt" "$tmp/genre_new.txt"
+        fi
+        if [[ ! -s "$tmp/genre_new.txt" ]]; then break; fi
+        cat "$tmp/genre_new.txt" >> "$tmp/genre_tried.txt"
+        mapfile -t gpids < "$tmp/genre_new.txt"
+        inlist="$(IFS=,; echo "${gpids[*]}")"
+        run_mysql "${mysql_args[@]}" -B --skip-column-names --raw \
+            -e "SELECT genreid, parentgenreid, genrecode, genrenamerus, TotalCount, NormalCount FROM $POP_SOURCE_DB.mlgenrename WHERE genreid IN ($inlist)" \
+            >> "$tmp/genres.tsv" || die "genre ancestor read failed"
+        LC_ALL=C sort -u -t $'\t' -k1,1 "$tmp/genres.tsv" -o "$tmp/genres.tsv"
+        awk -F'\t' '$2 != "NULL" && $2 != "" && $2 != "0" {print $2}' "$tmp/genres.tsv" \
+            | LC_ALL=C sort -un > "$tmp/genre_pids.txt"
+        giter=$((giter + 1))
+    done
+
     local T="$POP_TARGET_DB"
     local AWK_HELPERS='function esc(s,   r) { r = s; gsub(/\\/, "\\\\", r); gsub("\047", "\047\047", r); return r }
 function q(s)   { if (s == "NULL") return "NULL"; return "\047" esc(s) "\047" }
@@ -480,10 +516,13 @@ function num(s) { if (s == "NULL") return "NULL"; if (s ~ /^-?[0-9]+$/) return s
         printf "SET @sid_%s = LAST_INSERT_ID();\n", $1
     }' "$tmp/seqs.tsv" >> "$sql_f"
 
-    # 5.4 mlbook: one row per resolved book; real on-disk filename/arcname;
-    #     fresh bookid captured as @bid_<old>; catalog metadata verbatim.
-    #     book_cat.tsv = SELECT * (26 columns, bookid first); resolved.tsv
-    #     carries the walk data (rel, arc, size) per file.
+    # 5.4 mlbook: one row per resolved book; filename = the CATALOG value
+    #     (flibusta.mlbook.filename - the app expects the transliterated
+    #     name, not the on-disk path), arcname = on-disk zip member,
+    #     filesize = on-disk bytes; fresh bookid captured as @bid_<old>;
+    #     catalog metadata verbatim.  book_cat.tsv = SELECT * (26 columns,
+    #     bookid first); resolved.tsv carries the walk data (rel, arc,
+    #     size) per file.
     awk -F'\t' -v T="$T" -v CAT="$tmp/book_cat.tsv" "$AWK_HELPERS"'
     FILENAME == CAT {
         for (i = 1; i <= 26; i++) c[$1,i] = $i
@@ -496,7 +535,7 @@ function num(s) { if (s == "NULL") return "NULL"; if (s ~ /^-?[0-9]+$/) return s
         if (bid in done) next          # duplicate copies of the same book
         if (!(bid in have)) { miss[bid] = 1; next }
         done[bid] = 1
-        printf "INSERT INTO %s.mlbook (library,title,lang,date_in,filename,filesize,arcname,ext,deleted,md5,srclang,date_wr,keywords,di_progused,di_date,di_srcurl,di_srcosr,di_author,di_id,di_version,pi_bookname,pi_publisher,pi_city,pi_year,pi_isbn) VALUES (\047privetelib\047,%s,%s,%s,%s,%s,%s,\047fb2\047,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);\n", T, q(c[bid,3]),q(c[bid,4]),q(c[bid,5]),q(rel),num(sz),q(arc),q(c[bid,10]),q(c[bid,11]),q(c[bid,12]),q(c[bid,13]),q(c[bid,14]),q(c[bid,15]),q(c[bid,16]),q(c[bid,17]),q(c[bid,18]),q(c[bid,19]),q(c[bid,20]),q(c[bid,21]),q(c[bid,22]),q(c[bid,23]),q(c[bid,24]),q(c[bid,25]),q(c[bid,26])
+        printf "INSERT INTO %s.mlbook (library,title,lang,date_in,filename,filesize,arcname,ext,deleted,md5,srclang,date_wr,keywords,di_progused,di_date,di_srcurl,di_srcosr,di_author,di_id,di_version,pi_bookname,pi_publisher,pi_city,pi_year,pi_isbn) VALUES (\047privetelib\047,%s,%s,%s,%s,%s,%s,\047fb2\047,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);\n", T, q(c[bid,3]),q(c[bid,4]),q(c[bid,5]),q(c[bid,6]),num(sz),q(arc),q(c[bid,10]),q(c[bid,11]),q(c[bid,12]),q(c[bid,13]),q(c[bid,14]),q(c[bid,15]),q(c[bid,16]),q(c[bid,17]),q(c[bid,18]),q(c[bid,19]),q(c[bid,20]),q(c[bid,21]),q(c[bid,22]),q(c[bid,23]),q(c[bid,24]),q(c[bid,25]),q(c[bid,26])
         printf "SET @bid_%s = LAST_INSERT_ID();\n", bid
     }
     END { for (b in miss) print "warn: bookid " b " resolved but absent from catalog; skipped" > "/dev/stderr" }
@@ -558,11 +597,14 @@ the on-disk Books collection, md5-matching every book file against the
 flibusta catalog (mlbook.md5) and representing ONLY the resolved books
 in privetelib.  privetelib's own AUTO_INCREMENT columns generate every
 key (captured via LAST_INSERT_ID() into session variables that child
-rows reference), mlbook.filename/arcname carry the real on-disk paths,
-and the reference tables (authors, genres, series) are populated for the
-personal library's books only.  flibusta/mllbr_main are never written;
-the tool manages only the catalog tables it populates.  See
-docs/REPRESENTATION_PLAN.md (Phase 1).
+rows reference), mlbook.filename carries the catalog value (the
+app expects the transliterated name, not the on-disk path) while
+arcname/filesize come from the on-disk walk, and the reference tables
+(authors, genres, series) are populated for the personal library's
+books only - genre ancestor categories are pulled in so the genre tree
+renders.  flibusta/mllbr_main are never written; the tool manages only
+the catalog tables it populates.  See docs/REPRESENTATION_PLAN.md
+(Phase 1).
 
 Options:
   -n, --dry-run        walk + resolve + summarize, change nothing

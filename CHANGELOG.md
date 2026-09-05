@@ -9,6 +9,44 @@ All notable changes to the author-toolchain scripts in this repository:
 
 ## [Unreleased]
 
+- **`bin/populate_privetelib.sh` v1.1.0 -> v1.1.1 — genre tree restored
+  + catalog `filename` (fixes two MultiLib.exe test findings).**  App
+tests after the v1.1.0 rebuild surfaced two issues, both fixed:
+  - **genres**: the app renders `mlgenrename` as a tree, and in the
+    catalog every genre's `parentgenreid` points at a top-level
+    category row (ids 1000001+, e.g. «Фантастика» = 1000022) that no
+    book references directly — so the v1.1.0 subset (only the books'
+    own genres) produced a FLAT table (all 70 rows `parentgenreid`
+    = NULL) and the genre panel lost its hierarchy.  The tool now
+    pulls each used genre's ANCESTOR CATEGORIES from
+    `flibusta.mlgenrename` (iterative, bounded, dangling parents
+    safely skipped via a tried-set) and remaps `parentgenreid` to the
+    freshly generated parent id, parent-first — privetelib carries the
+    same 2-level tree the app expects (e.g. «Фантастика» ->
+    «Научная фантастика»).
+  - **filename**: `mlbook.filename` now carries the CATALOG value
+    (`flibusta.mlbook.filename`, the transliterated name the app
+    displays — the on-disk path was the user's mistake, not the app's
+    contract); `arcname` (on-disk zip member) and `filesize` (on-disk
+    bytes) are unchanged.
+
+  Mock suite updated to 31 assertions (still 31): ancestor-category
+  fixture served only by the new ancestor fetch, dangling-parent
+  fallback (NULL), catalog-filename assertions (`Title_One_FB2` & co),
+  and fresh-key joins through the ancestor-pulled genre.
+
+  **Re-rebuilt live 2026-09-04 (22:22)** against the real `Books` folder
+  (2156 files -> 2148 matched, 2138 bookids; same 99.6%): `mlgenrename`
+  is now **84** rows = 70 genres + **14 ancestor categories** (e.g.
+  «Фантастика» -> 30 children, «Детективы и триллеры» -> 5, …), every
+  `parentgenreid` remapped to a fresh parent id and `mlgenre` joins
+  100% intact (0 dangling); `mlbook.filename` = catalog value verbatim
+  (0 on-disk paths left; note ~71% of flibusta books carry a NUMERIC
+  `filename` = their bookid — a loader fallback — which the tool now
+  copies faithfully).  Pre-rebuild safety backup:
+  `/mnt/c/Backup_Go7/privetelib-backups/privetelib_20260904-221300.sql.gz`
+  (the v1.1.0 state).
+
 - **New `bin/backup_privetelib.sh` v1.0.0 — backup / restore of the
   app-registered personal library DB (`privetelib`).**  privetelib is the
   sibling library the MultiLib desktop app created in-app (Flibusta

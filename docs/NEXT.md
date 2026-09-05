@@ -58,7 +58,7 @@ mandatory prerequisite before Phase 1 populates anything:
 | **Match-rate spike (Phase 0.4)** | Ladder (a) `mlbook.filename`/`arcname`: **dead** — `filename` transliterated librusec-style, `arcname` 0% populated. Ladder (b) author+series+title: **2075/2156 (96.2%) exact**. **SUPERSEDED by the md5 finding below** — the population tool matched **2148/2156 (99.6%)** with zero fuzzy logic. |
 | **md5 finding (2026-09-04)** | `flibusta.mlbook.md5` is **100% populated** (all 869,130 rows) and hashes the **decompressed FB2 content** — `zcat file.zip \| md5sum` (== `unzip -p`) and loose `.fb2` resolve to exactly one bookid. No index on the column (equality scans ~1s); the tool pulls the whole `(md5, bookid)` map once and joins locally. Also: `mlcoverpage`/`mldescription` are EMPTY in the loaded dump (covers/descriptions need the extended-data torrents); real enrichment = ratings 361,761, series, genres, `mlcustinfo` 163,161. |
 
-### Shipped: the population tool (`bin/populate_privetelib.sh` v1.1.0)
+### Shipped: the population tool (`bin/populate_privetelib.sh` v1.1.1)
 
 Rebuilds `privetelib` from the `Books` collection: hash each file (zip by
 decompressed content, loose fb2 directly) -> join the one-shot `(md5, bookid)`
@@ -70,12 +70,16 @@ existence, in a single client session. The v1.0.0 "exact copy"
 (`INSERT…SELECT *` carrying flibusta's ids wholesale) is GONE: those foreign
 ids broke the app's key bookkeeping (exactly why MultiLib.exe showed catalog
 basics but no books). Reference entities are inserted for OUR books only
-(distinct authors/genres/series of the resolved bookids), `mlbook.filename` /
-`arcname` carry the real on-disk relative path + zip member name,
-`mlrating` copies the per-book aggregate from `flibusta.mlrating` (the
-`Flibusta_Load_mlrating.sql` output). Parity is checked for ALL 9 tables
-BEFORE any TRUNCATE — a mismatch aborts, never a partial rebuild.
-`flibusta` read-only; app-owned tables never touched. Report TSV per run
+(distinct authors/genres/series of the resolved bookids); **v1.1.1 fixes the
+two app-test findings**: `mlgenrename` pulls each used genre's ancestor
+categories (the catalog's 1000001+ tree rows) so the genre tree renders
+instead of a flat list, and `mlbook.filename` carries the CATALOG value
+(transliterated name the app displays) — `arcname` keeps the on-disk zip
+member name, `filesize` the on-disk bytes. `mlrating` copies the per-book
+aggregate from `flibusta.mlrating` (the `Flibusta_Load_mlrating.sql`
+output). Parity is checked for ALL 9 tables BEFORE any TRUNCATE — a
+mismatch aborts, never a partial rebuild. `flibusta` read-only; app-owned
+tables never touched. Report TSV per run
 (`/mnt/c/Backup_Go7/merge-reports/populate_privetelib_<ts>.tsv`).
 
 ```bash
@@ -92,6 +96,14 @@ BEFORE any TRUNCATE — a mismatch aborts, never a partial rebuild.
   mlseqname **422** — i.e. only the entities our books actually use (vs.
   216 491 / 296 / 80 744 in the old exact-copy state). AUTO_INCREMENT
   counters verified at rowcount+1 for all 9 tables.
+- **v1.1.1 re-rebuilt live 2026-09-04 (22:22)**: `mlgenrename` 70 ->
+  **84** rows (70 genres + 14 ancestor categories, e.g. «Фантастика»
+  -> 30 children), `parentgenreid` fully remapped, `mlgenre` joins
+  0-dangling; `mlbook.filename` = catalog value verbatim (2138/2138
+  non-empty, 0 on-disk paths; ~71% of flibusta filenames are numeric
+  bookids — loader fallback — copied faithfully).  Next: re-test in
+  MultiLib.exe — genre panel should show «Фантастика» -> «Научная
+  фантастика» & co, and book `filename` the catalog's value.
 - Suite `tests/test_populate_privetelib.sh` **31/31**; registered in
   bump-version.sh / test_version_sync.sh / CI. Pre-rebuild safety backups:
   `/mnt/c/Backup_Go7/privetelib-backups/privetelib_20260904-210914.sql.gz`

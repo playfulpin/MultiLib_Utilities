@@ -393,7 +393,7 @@ unambiguous.  **Only books present in the `Books` folder are represented**
 ./bin/populate_privetelib.sh --debug             # verbose diagnostics
 ```
 
-**Fresh-key, row-by-row rebuild (v1.1.0).**  privetelib's own
+**Fresh-key, row-by-row rebuild (v1.1.1).**  privetelib's own
 `AUTO_INCREMENT` columns generate EVERY key: the tool emits one `INSERT`
 per row and captures each freshly generated id with `LAST_INSERT_ID()`
 into a session variable (`@bid_<old>`, `@aid_<old>`, `@gid_<old>`,
@@ -402,12 +402,14 @@ attached data (`mlrating`, `mlcustinfo`) reference only those captured
 ids.  The whole rebuild runs as one SQL script in a single client session
 (`TRUNCATE` first, so every run is a clean rebuild).  Reference entities
 are inserted for the personal library's books only — `mlauthorname`
-(distinct authors), `mlgenrename` (distinct genres; `parentgenreid`
-remapped to the fresh parent id, or `NULL` when the parent genre is not
-used), `mlseqname` (distinct series).  `mlbook.filename`/`arcname` carry
-the **real on-disk relative path** and zip member name
-(`library='privetelib'`, `filesize` = on-disk bytes, catalog metadata
-copied verbatim), so the app can open files from the library.
+(distinct authors), `mlgenrename` (distinct genres **plus their ancestor
+categories, so the genre tree the app renders is preserved**;
+`parentgenreid` remapped to the fresh parent id, or `NULL` when an
+ancestor is absent), `mlseqname` (distinct series).  `mlbook.filename`
+carries the **catalog value** (`flibusta.mlbook.filename`, the
+transliterated name the app displays — not the on-disk path), `arcname`
+the on-disk zip member name (`library='privetelib'`, `filesize` =
+on-disk bytes, catalog metadata copied verbatim).
 `mlrating` rows come from `flibusta.mlrating` — the per-book aggregate
 rating produced by `BookTracker-import/sql/Flibusta_Load_mlrating.sql`.
 `flibusta` is read-only; app-owned tables in `privetelib` (`mlactual`,
@@ -488,7 +490,7 @@ Releases are tagged with a tool-prefixed name:
 | `bin/reconcile_library.sh` | 1.0.3 | `reconcile_library-1.0.3` |
 | `bin/estimate_download_size.sh` | 1.0.0 | `estimate_download_size-1.0.0` |
 | `bin/backup_privetelib.sh` | 1.0.0 | `backup_privetelib-1.0.0` |
-| `bin/populate_privetelib.sh` | 1.1.0 | `populate_privetelib-1.1.0` |
+| `bin/populate_privetelib.sh` | 1.1.1 | `populate_privetelib-1.1.1` |
 | `lib/utf8_prefix_generator.awk` | 1.1 | `utf8_prefix_generator-1.1` |
 
 `v2.8.1` and `v6.6.8` predate the tool-prefixed convention.
@@ -521,7 +523,7 @@ bin/export_authors_from_db.sh       regenerate the author list from the DB
 bin/reconcile_library.sh            personal-catalog collection-progress report
 bin/estimate_download_size.sh       catalog download-size estimate for a to-collect round
 bin/backup_privetelib.sh            backup/restore of the app-registered privetelib library DB
-bin/populate_privetelib.sh          rebuild privetelib from the Books collection (md5-matched, fresh keys, real paths)
+bin/populate_privetelib.sh          rebuild privetelib from the Books collection (md5-matched, fresh keys, genre tree, catalog filename)
 bin/bump-version.sh                 bump one tool's version across header + docs
 bin/merge_books_into_skeleton.sh    archive -> in-memory prefix merge tool (BooksInput_<ts> out)
 bin/merge_skeleton_into_books.sh    BooksInput_* -> Books rsync finalize tool

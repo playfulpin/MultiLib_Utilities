@@ -8,14 +8,16 @@
 > by design (backs up the current state first; refuses to overwrite a
 > non-empty library without `--force`).
 >
-> **Population tool (implemented):** `bin/populate_privetelib.sh` v1.1.0 —
+> **Population tool (implemented):** `bin/populate_privetelib.sh` v1.1.1 —
 > rebuilds `privetelib` from the on-disk `Books` collection by md5-matching
 > every book file against `flibusta.mlbook.md5` and inserting ONLY the
 > resolved books with FRESH keys (row-by-row, `LAST_INSERT_ID()` captured
-> into session variables child rows reference), real on-disk
-> `filename`/`arcname`, and reference tables populated for the personal
-> library's books only.  The md5 finding below made the match exact and
-> unambiguous; the v1.1.0 key strategy made the result visible in the app.
+> into session variables child rows reference), genre ancestor categories
+> pulled in so the genre tree renders, catalog `filename` (not the on-disk
+> path), and reference tables populated for the personal library's books
+> only.  The md5 finding below made the match exact and unambiguous; the
+> v1.1.0 key strategy made the result visible in the app; v1.1.1 fixed the
+> flat genre tree and the filename contract found in app tests.
 
 ## Goal
 
@@ -163,7 +165,7 @@ populated rows (pending).
 
 ### Phase 1 — Population tool
 
-**SHIPPED: `bin/populate_privetelib.sh` v1.1.0** (project conventions:
+**SHIPPED: `bin/populate_privetelib.sh` v1.1.1** (project conventions:
 versioned header, config, `--dry-run`/`--debug`, MariaDB lifecycle, tests,
 CI, docs): scan `Books` → hash → md5-resolve `bookid`s → rebuild `privetelib`
 row-by-row with FRESH keys → per-run TSV report
@@ -178,17 +180,20 @@ books.  v1.1.0 lets privetelib's `AUTO_INCREMENT` generate every key:
 one `INSERT` per row, `LAST_INSERT_ID()` captured into a session variable
 (`@bid_`/`@aid_`/`@gid_`/`@sid_`), child rows referencing only captured
 ids; one SQL script in one client session with `TRUNCATE` first.  Only
-books on disk are represented; `mlbook.filename`/`arcname` hold the real
-on-disk relative path + zip member name so the app can open files;
-`mlgenrename.parentgenreid` is remapped to the fresh parent id (or NULL
-when the parent genre is unused); `mlrating` comes from `flibusta.mlrating`
-(the `Flibusta_Load_mlrating.sql` aggregate).  A parity mismatch on ANY
+books on disk are represented; `mlbook.filename` holds the CATALOG value
+(the transliterated name the app displays — v1.1.1 dropped the on-disk
+path), `arcname` the on-disk zip member; `mlgenrename` pulls the used
+genres' ancestor categories so the genre tree renders, with
+`parentgenreid` remapped to the fresh parent id (or NULL when an ancestor
+is absent); `mlrating` comes from `flibusta.mlrating` (the
+`Flibusta_Load_mlrating.sql` aggregate).  A parity mismatch on ANY
 managed table aborts before any `TRUNCATE`.
 
 **Acceptance (revised):** app switched to `privetelib` shows the full
-personal collection with ratings/series/genres and opens files (the
-open-trial — with real paths now in `filename`/`arcname`, this is the
-next probe); re-running is a no-op rebuild; `flibusta` and `mllbr_main`
+personal collection with ratings/series/genres — v1.1.1 restored the
+genre tree and the catalog `filename` after the first app tests; the
+open-trial (with the on-disk `arcname`, this is the next probe) remains
+pending; re-running is a no-op rebuild; `flibusta` and `mllbr_main`
 untouched (verify by diff).  Covers/descriptions are a FUTURE add-on:
 load the extended-data torrents, then re-run the population tool (which
 will copy them automatically).

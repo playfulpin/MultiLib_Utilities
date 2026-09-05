@@ -178,7 +178,7 @@ in the dump source; the loaded table holds 869,130 rows).
 | `title` | varchar(255) | Book title |
 | `lang` | varchar(10) | Language code (indexed) |
 | `date_in` | datetime | Date the book entered the catalog |
-| `filename` | varchar(255) | **Transliterated** librusec-style name in the catalog (indexed) — *not* the archive filename; see [7.2](#72-filename--arcname-are-not-archive-names). In `privetelib` this holds the **real on-disk relative path**. |
+| `filename` | varchar(255) | **Transliterated** librusec-style name in the catalog (indexed) — *not* the archive filename; see [7.2](#72-filename--arcname-are-not-archive-names). In `privetelib` (v1.1.1+) it holds the **same catalog value** — the app displays it. |
 | `filesize` | int | Size in bytes (decompressed FB2 size in the catalog; on-disk file size in `privetelib`) |
 | `arcname` | varchar(255) | Zip member name; **empty (0%) in the catalog**, populated in `privetelib` |
 | `ext` | varchar(5) | Content format, `'fb2'` (indexed) |
@@ -529,9 +529,11 @@ resolve: file md5 → bookid (duplicates → lowest bookid)
 flibusta (chunked reads, POP_CHUNK=500) ──▶ one SQL script, one session:
         │     TRUNCATE the 9 managed tables
         │     INSERT mlauthorname  (fresh @aid_* per author)
-        │     INSERT mlgenrename   (fresh @gid_*; parent remap, parent-first)
+        │     INSERT mlgenrename   (fresh @gid_*; ancestor categories pulled
+        │                           in, parent remap, parent-first)
         │     INSERT mlseqname     (fresh @sid_* per series)
-        │     INSERT mlbook        (fresh @bid_*; real filename/arcname)
+        │     INSERT mlbook        (fresh @bid_*; catalog filename,
+        │                           on-disk arcname/filesize)
         │     INSERT mlauthor / mlgenre / mlseq     (reference captured vars)
         │     INSERT mlrating / mlcustinfo          (reference captured vars)
         ▼
