@@ -9,6 +9,39 @@ All notable changes to the author-toolchain scripts in this repository:
 
 ## [Unreleased]
 
+- **Docs: `docs/MultiLib_Flibusta_DB.md` rewritten (rev 2) and
+  `data/sql/qry_catalog_reference.sql` added.**  The DB reference is
+  re-grounded in the live schema (every figure re-verified read-only
+  against the server 2026-09-04) and corrects the pre-v1.1.1 claims that
+  the app re-test disproved.  New/corrected content:
+  - **genre tree, verified**: `mlgenrename` = 296 rows = **24 root
+    category rows** (ids 1,000,001-1,000,024, EMPTY `genrecode`, zero
+    counts — e.g. «Фантастика» = 1000022) + **272 leaf genres** (real
+    codes, `parentgenreid` -> a root); the tree is exactly two levels,
+    books join ONLY leaves, and the join is closed (0 orphans in both
+    DBs).  `privetelib` after the v1.1.1 rebuild: 84 = 14 roots + 70
+    leaves with remapped parent ids;
+  - **key strategy**: sparse catalog ids (watermarks run far past row
+    counts — `mlseqname` 80,744 rows / watermark 112,843) vs
+    `privetelib`'s contiguous fresh keys (watermark = rows + 1 on all
+    nine managed tables);
+  - **filename contract corrected to v1.1.1**: `mlbook.filename` = the
+    CATALOG value (71% of flibusta rows are a numeric bookid fallback;
+    93% numeric in the personal library), `arcname` = verbatim on-disk
+    zip member / `'-'` for loose `.fb2`, `filesize` = on-disk bytes;
+  - **index inventory** with the flibusta-only oddity (indexes named
+    `MiddleName`/`NickName` defined on the `LastName` column, absent in
+    `privetelib`) and the corrected `mlbook.md5` non-unique index;
+  - **mlbook census**: ~200 legacy `ext` values (fb2 728,881, pdf
+    58,117, ...), `deleted` 0/1 split, `md5` 100% populated;
+  - full live row counts + AUTO_INCREMENT watermarks for both DBs,
+    `mllbr_main` exact schema, re-verified `Flibusta_Load_mlrating.sql`
+    steps, and a quick-reference SQL section — now also shipped as the
+    self-contained script `data/sql/qry_catalog_reference.sql` (genre
+    tree, full-book lookup, md5 lookup, table parity; queries B/C use
+    `@title`/`@md5` session variables; verified to run cleanly against
+    `flibusta` 2026-09-04).
+
 - **`bin/populate_privetelib.sh` v1.1.0 -> v1.1.1 — genre tree restored
   + catalog `filename` (fixes two MultiLib.exe test findings).**  App
 tests after the v1.1.0 rebuild surfaced two issues, both fixed:
