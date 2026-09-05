@@ -384,8 +384,8 @@ from the on-disk `Books` collection (Phase 1 of
 (zip-wrapped FB2 by its **decompressed content**, loose `*.fb2` directly)
 and matched against `flibusta.mlbook.md5` — the dump pipeline populates
 that column for ALL 869,130 catalog rows, so md5 matching is exact and
-unambiguous.  Resolved bookids copy their full catalog rows
-(`INSERT … SELECT`, per-run column-parity checked) into `privetelib`:
+unambiguous.  **Only books present in the `Books` folder are represented**
+— no exact-copy of the flibusta catalog:
 
 ```bash
 ./bin/populate_privetelib.sh                     # rebuild privetelib from Books
@@ -393,14 +393,30 @@ unambiguous.  Resolved bookids copy their full catalog rows
 ./bin/populate_privetelib.sh --debug             # verbose diagnostics
 ```
 
-Copied tables: `mlbook`, `mlauthor`, `mlgenre`, `mlseq`, `mlrating`,
-`mlcustinfo` (per resolved bookid, chunked `IN`-lists) plus the small
-reference tables `mlauthorname`, `mlgenrename`, `mlseqname` (copied
-whole).  `flibusta` is read-only; app-owned tables in `privetelib`
-(`mlactual`, `mldownloaddata`, `mlnews*`, `mluser*`) are never touched.
+**Fresh-key, row-by-row rebuild (v1.1.0).**  privetelib's own
+`AUTO_INCREMENT` columns generate EVERY key: the tool emits one `INSERT`
+per row and captures each freshly generated id with `LAST_INSERT_ID()`
+into a session variable (`@bid_<old>`, `@aid_<old>`, `@gid_<old>`,
+`@sid_<old>`); the join tables (`mlauthor`, `mlgenre`, `mlseq`) and the
+attached data (`mlrating`, `mlcustinfo`) reference only those captured
+ids.  The whole rebuild runs as one SQL script in a single client session
+(`TRUNCATE` first, so every run is a clean rebuild).  Reference entities
+are inserted for the personal library's books only — `mlauthorname`
+(distinct authors), `mlgenrename` (distinct genres; `parentgenreid`
+remapped to the fresh parent id, or `NULL` when the parent genre is not
+used), `mlseqname` (distinct series).  `mlbook.filename`/`arcname` carry
+the **real on-disk relative path** and zip member name
+(`library='privetelib'`, `filesize` = on-disk bytes, catalog metadata
+copied verbatim), so the app can open files from the library.
+`mlrating` rows come from `flibusta.mlrating` — the per-book aggregate
+rating produced by `BookTracker-import/sql/Flibusta_Load_mlrating.sql`.
+`flibusta` is read-only; app-owned tables in `privetelib` (`mlactual`,
+`mldownloaddata`, `mlnews*`, `mluser*`) are never touched.
 `mlcoverpage`/`mldescription` are not populated — the loaded dump leaves
 both empty (covers/descriptions need the separate extended-data torrents
-loaded first).  Each run writes a TSV report (matched/unmatched per file)
+loaded first).  A column-parity mismatch on ANY managed table aborts the
+run before any `TRUNCATE` (a partial rebuild would leave dangling key
+references).  Each run writes a TSV report (matched/unmatched per file)
 to `POP_REPORT_DIR`; the MariaDB lifecycle and `MYSQL_*` client settings
 are shared via `lib/mariadb_lifecycle.sh`, password via `MYSQL_PWD` only.
 
@@ -425,7 +441,7 @@ bash tests/test_export_authors_from_db.sh            # exporter: argv, rows, lif
 bash tests/test_reconcile_library.sh                 # recon: classification + collection-progress summary (mock mysql)
 bash tests/test_estimate_download_size.sh            # estimator: sums, top-rated-first breakdown, lifecycle mocks (runs anywhere)
 bash tests/test_backup_privetelib.sh                 # backup/restore: argv, gz artifact, restore guards, lifecycle mocks (runs anywhere)
-bash tests/test_populate_privetelib.sh               # populate: md5 map, walk/hash, resolve, rebuild, parity, lifecycle mocks (runs anywhere)
+bash tests/test_populate_privetelib.sh               # populate: md5 map, walk/hash, resolve, fresh-key row-by-row rebuild, parity abort, lifecycle mocks (runs anywhere)
 bash tests/test_version_sync.sh                      # version locations agree (runs anywhere)
 ```
 
@@ -472,7 +488,7 @@ Releases are tagged with a tool-prefixed name:
 | `bin/reconcile_library.sh` | 1.0.3 | `reconcile_library-1.0.3` |
 | `bin/estimate_download_size.sh` | 1.0.0 | `estimate_download_size-1.0.0` |
 | `bin/backup_privetelib.sh` | 1.0.0 | `backup_privetelib-1.0.0` |
-| `bin/populate_privetelib.sh` | 1.0.0 | `populate_privetelib-1.0.0` |
+| `bin/populate_privetelib.sh` | 1.1.0 | `populate_privetelib-1.1.0` |
 | `lib/utf8_prefix_generator.awk` | 1.1 | `utf8_prefix_generator-1.1` |
 
 `v2.8.1` and `v6.6.8` predate the tool-prefixed convention.
@@ -505,7 +521,7 @@ bin/export_authors_from_db.sh       regenerate the author list from the DB
 bin/reconcile_library.sh            personal-catalog collection-progress report
 bin/estimate_download_size.sh       catalog download-size estimate for a to-collect round
 bin/backup_privetelib.sh            backup/restore of the app-registered privetelib library DB
-bin/populate_privetelib.sh          rebuild privetelib from the Books collection (md5-matched)
+bin/populate_privetelib.sh          rebuild privetelib from the Books collection (md5-matched, fresh keys, real paths)
 bin/bump-version.sh                 bump one tool's version across header + docs
 bin/merge_books_into_skeleton.sh    archive -> in-memory prefix merge tool (BooksInput_<ts> out)
 bin/merge_skeleton_into_books.sh    BooksInput_* -> Books rsync finalize tool

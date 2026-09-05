@@ -42,6 +42,63 @@ All notable changes to the author-toolchain scripts in this repository:
      `CREATE TABLE privetelib.mlcustinfo LIKE flibusta.mlcustinfo`.
      The post-repair backup `privetelib_20260904-004417.sql.gz` is the
      known-good artifact.
+- **`bin/populate_privetelib.sh` v1.0.0 -> v1.1.0 — fresh-key, row-by-row
+  rebuild of `privetelib` (fixes the app showing no books).**  The v1.0.0
+  exact-copy approach (`INSERT … SELECT *` carrying flibusta's ids
+  wholesale) was wrong: the copied foreign ids were meaningless to the
+  app's own key bookkeeping, which is why MultiLib.exe showed catalog
+  basics but zero books.  v1.1.0 generates EVERY key in privetelib's own
+  `AUTO_INCREMENT` columns: one `INSERT` per row, `LAST_INSERT_ID()`
+  captured into a session variable (`@bid_<old>`, `@aid_<old>`,
+  `@gid_<old>`, `@sid_<old>`), and the join/attached tables
+  (`mlauthor`, `mlgenre`, `mlseq`, `mlrating`, `mlcustinfo`) reference
+  ONLY those captured ids — keys are used only after they come into
+  existence, exactly as the dump files themselves do (ids generated via
+  `AUTO_INCREMENT`, then referenced).  The whole rebuild is one SQL
+  script in a single client session; `TRUNCATE` first resets the
+  counters, so every run is a clean rebuild.  ONLY books present in the
+  `Books` folder are represented:
+  - reference tables inserted for our books only — `mlauthorname`
+    (distinct authors), `mlgenrename` (distinct genres, `parentgenreid`
+    remapped to the fresh parent id or `NULL` when the parent genre is
+    not used, emitted parent-first), `mlseqname` (distinct series);
+    no more whole-table copies (v1.0.0 had 216,491 authors / 80,744
+    series);
+  - `mlbook.filename`/`arcname` carry the **real on-disk relative path**
+    (e.g. `А/Аб/Абби Линн/Series X/0Мироходец.zip`) and the zip member
+    name (`library='privetelib'`, `filesize` = on-disk bytes, `ext='fb2'`,
+    catalog metadata verbatim);
+  - `mlrating` copied from `flibusta.mlrating` — the per-book CHAR(1)
+    aggregate produced by `BookTracker-import/sql/
+    Flibusta_Load_mlrating.sql` (the raw per-user `librate` source is
+    dropped by the ingest cleanup, so the aggregate is authoritative);
+  - column-parity mismatch on ANY managed table now ABORTS before any
+    `TRUNCATE` (all-or-nothing — a partial rebuild would leave dangling
+    key references).
+
+  Mock suite `tests/test_populate_privetelib.sh` rewritten (31
+  assertions): fresh-key captures, no raw flibusta ids in any `VALUES`,
+  real filename/arcname, genre parent remap + parent-first ordering,
+  mlrating only for rated books, chunked-read determinism (`POP_CHUNK`
+  independent), parity abort, dry-run no-writes, lifecycle mocks.
+
+  **Rebuilt live 2026-09-04**: dry-run and real run against the real
+  `Books` folder (2156 files -> 2148 matched = 99.6%, 8 unmatched,
+  2138 bookids, 0 corrupt).  Post-rebuild row counts (fresh keys,
+  auto-increment verified at rowcount+1 on all 9 managed tables):
+  `mlbook` 2138, `mlauthor` 2798, `mlgenre` 5468, `mlseq` 2619,
+  `mlrating` 1948 (distribution 1:30 / 2:278 / 3:874 / 4:534 / 5:232),
+  `mlcustinfo` 757, `mlauthorname` 187, `mlgenrename` 70,
+  `mlseqname` 422 — only the entities the personal library actually
+  uses, vs. 216,491 / 296 / 80,744 in the v1.0.0 exact-copy state.
+  Pre-rebuild safety backups saved to
+  `/mnt/c/Backup_Go7/privetelib-backups/` (latest:
+  `privetelib_20260904-210914.sql.gz`, the 6 MB v1.0.0 state).
+  Note: the zip member names inside the Books archives are themselves
+  double-encoded (UTF-8 bytes decoded as cp866 when the zips were
+  created) — `arcname` stores the member bytes verbatim so the app's
+  zip reader sees exactly what is in the archive.
+
 - **New `bin/populate_privetelib.sh` v1.0.0 — rebuild `privetelib` from
   the on-disk `Books` collection (representation plan Phase 1).**  The
   matching key is the md5 finding (see below): every book file is hashed

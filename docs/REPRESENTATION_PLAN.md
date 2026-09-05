@@ -1,18 +1,21 @@
 # Personal library representation plan
 
-**Status:** Design approved; safety net + Phase 1 tool implemented
-**Updated:** 2026-09-04 (rev 5 — md5 finding + population tool shipped)
+**Status:** Design approved; safety net + Phase 1 tool implemented (v1.1.0)
+**Updated:** 2026-09-04 (rev 6 — fresh-key population rewrite)
 
 > **Safety net (implemented):** `bin/backup_privetelib.sh` v1.0.0 — backup /
 > restore / verify / list of `privetelib` via mysqldump.  `restore` is safe
 > by design (backs up the current state first; refuses to overwrite a
 > non-empty library without `--force`).
 >
-> **Population tool (implemented):** `bin/populate_privetelib.sh` v1.0.0 —
+> **Population tool (implemented):** `bin/populate_privetelib.sh` v1.1.0 —
 > rebuilds `privetelib` from the on-disk `Books` collection by md5-matching
-> every book file against `flibusta.mlbook.md5` and copying the full catalog
-> rows for the resolved bookids (`INSERT … SELECT`, parity-checked, chunked).
-> The md5 finding below made the match exact and unambiguous.
+> every book file against `flibusta.mlbook.md5` and inserting ONLY the
+> resolved books with FRESH keys (row-by-row, `LAST_INSERT_ID()` captured
+> into session variables child rows reference), real on-disk
+> `filename`/`arcname`, and reference tables populated for the personal
+> library's books only.  The md5 finding below made the match exact and
+> unambiguous; the v1.1.0 key strategy made the result visible in the app.
 
 ## Goal
 
@@ -160,19 +163,35 @@ populated rows (pending).
 
 ### Phase 1 — Population tool
 
-**SHIPPED: `bin/populate_privetelib.sh` v1.0.0** (project conventions:
+**SHIPPED: `bin/populate_privetelib.sh` v1.1.0** (project conventions:
 versioned header, config, `--dry-run`/`--debug`, MariaDB lifecycle, tests,
 CI, docs): scan `Books` → hash → md5-resolve `bookid`s → rebuild `privetelib`
-from `flibusta` by resolved ids (parity-checked, chunked) → per-run TSV
-report (matched/unmatched/corrupt/skipped).  Matched files are the whole
+row-by-row with FRESH keys → per-run TSV report
+(matched/unmatched/corrupt/skipped).  Matched files are the whole
 collection: the ladder (a) md5 tier resolves them exactly; ladder (b)
 (author/series/title) remains as the fallback for unmatched files.
 
+**Key strategy (v1.1.0, the fix for "app shows no books"):** the v1.0.0
+`INSERT … SELECT *` copied flibusta's ids wholesale — foreign ids broke
+the app's key bookkeeping, so MultiLib.exe listed catalog basics but no
+books.  v1.1.0 lets privetelib's `AUTO_INCREMENT` generate every key:
+one `INSERT` per row, `LAST_INSERT_ID()` captured into a session variable
+(`@bid_`/`@aid_`/`@gid_`/`@sid_`), child rows referencing only captured
+ids; one SQL script in one client session with `TRUNCATE` first.  Only
+books on disk are represented; `mlbook.filename`/`arcname` hold the real
+on-disk relative path + zip member name so the app can open files;
+`mlgenrename.parentgenreid` is remapped to the fresh parent id (or NULL
+when the parent genre is unused); `mlrating` comes from `flibusta.mlrating`
+(the `Flibusta_Load_mlrating.sql` aggregate).  A parity mismatch on ANY
+managed table aborts before any `TRUNCATE`.
+
 **Acceptance (revised):** app switched to `privetelib` shows the full
-personal collection with ratings/series/genres and opens files; re-running
-is a no-op rebuild; `flibusta` and `mllbr_main` untouched (verify by diff).
-Covers/descriptions are a FUTURE add-on: load the extended-data torrents,
-then re-run the population tool (which will copy them automatically).
+personal collection with ratings/series/genres and opens files (the
+open-trial — with real paths now in `filename`/`arcname`, this is the
+next probe); re-running is a no-op rebuild; `flibusta` and `mllbr_main`
+untouched (verify by diff).  Covers/descriptions are a FUTURE add-on:
+load the extended-data torrents, then re-run the population tool (which
+will copy them automatically).
 
 ### Phase 2 — Collection status inside the app
 

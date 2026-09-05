@@ -1,7 +1,7 @@
 # NEXT — where to resume
 
-> Updated: 2026-09-04 (evening)
-> Last commit: `[populate_privetelib]` — Phase 1 population tool shipped (see git log)
+> Updated: 2026-09-04 (late) — privetelib REBUILT with fresh keys (v1.1.0)
+> Last commit: `[populate_privetelib]` — Phase 1 population tool v1.1.0 + live rebuild (see git log)
 
 ## Resume checklist
 
@@ -58,32 +58,55 @@ mandatory prerequisite before Phase 1 populates anything:
 | **Match-rate spike (Phase 0.4)** | Ladder (a) `mlbook.filename`/`arcname`: **dead** — `filename` transliterated librusec-style, `arcname` 0% populated. Ladder (b) author+series+title: **2075/2156 (96.2%) exact**. **SUPERSEDED by the md5 finding below** — the population tool matched **2148/2156 (99.6%)** with zero fuzzy logic. |
 | **md5 finding (2026-09-04)** | `flibusta.mlbook.md5` is **100% populated** (all 869,130 rows) and hashes the **decompressed FB2 content** — `zcat file.zip \| md5sum` (== `unzip -p`) and loose `.fb2` resolve to exactly one bookid. No index on the column (equality scans ~1s); the tool pulls the whole `(md5, bookid)` map once and joins locally. Also: `mlcoverpage`/`mldescription` are EMPTY in the loaded dump (covers/descriptions need the extended-data torrents); real enrichment = ratings 361,761, series, genres, `mlcustinfo` 163,161. |
 
-### Shipped: the population tool (`bin/populate_privetelib.sh` v1.0.0)
+### Shipped: the population tool (`bin/populate_privetelib.sh` v1.1.0)
 
 Rebuilds `privetelib` from the `Books` collection: hash each file (zip by
 decompressed content, loose fb2 directly) -> join the one-shot `(md5, bookid)`
-map -> `TRUNCATE` + `INSERT…SELECT` the 9 managed tables (per-book
-`mlbook`/`mlauthor`/`mlgenre`/`mlseq`/`mlrating`/`mlcustinfo` chunked,
-whole `mlauthorname`/`mlgenrename`/`mlseqname`), parity-checked per run.
+map -> rebuild the 9 managed tables **row-by-row with FRESH keys**: every
+`AUTO_INCREMENT` in privetelib generates the id, captured per insert via
+`LAST_INSERT_ID()` into session variables (`@bid_<old>`, `@aid_<old>`, …)
+that child rows reference — keys are used only after they come into
+existence, in a single client session. The v1.0.0 "exact copy"
+(`INSERT…SELECT *` carrying flibusta's ids wholesale) is GONE: those foreign
+ids broke the app's key bookkeeping (exactly why MultiLib.exe showed catalog
+basics but no books). Reference entities are inserted for OUR books only
+(distinct authors/genres/series of the resolved bookids), `mlbook.filename` /
+`arcname` carry the real on-disk relative path + zip member name,
+`mlrating` copies the per-book aggregate from `flibusta.mlrating` (the
+`Flibusta_Load_mlrating.sql` output). Parity is checked for ALL 9 tables
+BEFORE any TRUNCATE — a mismatch aborts, never a partial rebuild.
 `flibusta` read-only; app-owned tables never touched. Report TSV per run
 (`/mnt/c/Backup_Go7/merge-reports/populate_privetelib_<ts>.tsv`).
 
 ```bash
+./bin/backup_privetelib.sh                # FIRST: safety backup of current privetelib
 ./bin/populate_privetelib.sh --dry-run   # walk + resolve + summarize, write nothing
-./bin/populate_privetelib.sh             # rebuild (backup_privetelib.sh first when non-empty)
+./bin/populate_privetelib.sh             # rebuild (TRUNCATE + fresh-key row-by-row INSERTs)
 ```
 
-- **Verified live 2026-09-04**: 2156 files -> 2148 matched (99.6%), 8
-  unmatched, 2138 bookids registered. privetelib rows after the run: mlbook
-  2138, mlauthor 2798, mlgenre 5468, mlseq 2619, mlrating 1948, mlcustinfo
-  757, mlauthorname 216491, mlgenrename 296, mlseqname 80744.
-- Suite `tests/test_populate_privetelib.sh` 23/23; registered in
-  bump-version.sh / test_version_sync.sh / CI. Pre-population safety backup:
-  `/mnt/c/Backup_Go7/privetelib-backups/privetelib_20260904-164703.sql.gz`.
+- **Rebuilt live 2026-09-04 (21:09)**: 2156 files -> 2148 matched (99.6%), 8
+  unmatched, 2138 bookids registered. privetelib rows AFTER the fresh-key
+  rebuild: mlbook **2138** (ids 1..2138), mlauthor 2798, mlgenre 5468,
+  mlseq 2619, mlrating 1948 (distribution 1:30, 2:278, 3:874, 4:534,
+  5:232), mlcustinfo 757, mlauthorname **187**, mlgenrename **70**,
+  mlseqname **422** — i.e. only the entities our books actually use (vs.
+  216 491 / 296 / 80 744 in the old exact-copy state). AUTO_INCREMENT
+  counters verified at rowcount+1 for all 9 tables.
+- Suite `tests/test_populate_privetelib.sh` **31/31**; registered in
+  bump-version.sh / test_version_sync.sh / CI. Pre-rebuild safety backups:
+  `/mnt/c/Backup_Go7/privetelib-backups/privetelib_20260904-210914.sql.gz`
+  (the 6 MB v1.0.0 state) and the older empty-state snapshots.
 - **The 8 unmatched** are 7 Bушков «Пиранья» volumes + 1 Bulychev
   «Девочка…» — exact-content mismatches (catalog has a different edition/
   normalization of the same book). These are the fallback-tier candidates
   (author/series/title ladder).
+- **arcname finding (verified 2026-09-04)**: the zip member names inside the
+  Books archives are themselves double-encoded mojibake (`01-╨Я╨╡╤А╨▓╨╛╨╡`
+  — UTF-8 decoded as cp866 by whatever tool created the zips). The tool
+  stores the member bytes VERBATIM, so the app's zip reader sees exactly the
+  name physically in the archive — do NOT "fix" arcname to clean UTF-8 or
+  member lookup inside the zip would break. `flibusta.mlbook.arcname` is
+  empty, so the source catalog is no help here either.
 
 ## Environment quirks (learned 2026-09-04 — remember these)
 
@@ -107,12 +130,14 @@ whole `mlauthorname`/`mlgenrename`/`mlseqname`), parity-checked per run.
 
 ## Next steps (priority order)
 
-1. **Commit + push the populate tool** (this change set); confirm CI green.
-2. **Open-trial (decisive for openability)**: switch MultiLib.exe to
+1. **Open-trial (decisive for openability)**: switch MultiLib.exe to
    `privetelib` and try to open one of the registered books (e.g. the
-   MeXXanik «Адвокат Чехов» one — bookid 767638). If files don't open, the
-   `mlbook.filename` naming convention needs a mapping layer — iterate until
-   one file opens. This also validates the populated rows in-app.
+   MeXXanik «Адвокат Чехов» one — privetelib bookid 1,
+   `M/MeXXanik Гоблин/Адвокат Чехов/01-Первое дело.zip`). If files don't
+   open, the `mlbook.filename` naming convention needs a mapping layer —
+   iterate until one file opens. This also validates the populated rows
+   in-app (the v1.0.0 rebuild showed catalog basics but NO books; the
+   v1.1.0 fresh-key rebuild is the fix — confirm the book list renders).
 3. **Behavior probe (post-population)**: user downloads/opens one book in
    `privetelib` in-app; diff datadir before/after to learn the exact rows
    the app writes (`mlbook` shape, `mldownloaddata`) and where files land.
@@ -139,7 +164,11 @@ whole `mlauthorname`/`mlgenrename`/`mlseqname`), parity-checked per run.
   plan matching around them. The monthly-archive filenames on disk
   (`01-Первое дело.zip`, `0Мироходец.zip`) are series-number + title;
   normalize by stripping `^[0-9]+[ -]*` before comparing to `mlbook.title`.
-- md5-exact matching remains unavailable (the dump's `lib.md5` content
-  hashes are deliberately not loaded) — future option, not a dependency.
+- The raw dump sources (`lib*.sql.gz`, the 12 tables + `lib.md5.txt.gz`
+  checksums) are kept on disk at `data/archives/flibusta_gz/` (git-ignored,
+  ~130 MB) for reference / re-loads; they are already ingested into
+  `flibusta` by the BookTracker-import pipeline.
+- Full database reference: `docs/MultiLib_Flibusta_DB.md` — the 17-table
+  ml* schema, the lib* dump schema, ingest/update logic, key findings.
 - `docs/` is markdown-only; keep the plan and this file in sync after each
   phase.
